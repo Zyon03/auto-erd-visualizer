@@ -29,7 +29,7 @@ describe('relationship mutations', () => {
   it('updates a relationship', () => {
     const rel = addRelationship(db, sessionId, userIdField, orderUserIdField, 'one-to-many')
     const updated = updateRelationship(db, rel.id, { aiComment: 'Updated comment' })
-    expect(updated.aiComment).toBe('Updated comment')
+    expect(updated?.aiComment).toBe('Updated comment')
   })
 
   it('deletes a relationship', () => {
