@@ -12,6 +12,7 @@ export interface TableNodeData extends Record<string, unknown> {
   tableId: number
   name: string
   fields: TableNodeField[]
+  onAddField?: (tableId: number) => void
 }
 
 export type TableNodeType = Node<TableNodeData, 'table'>
@@ -42,6 +43,16 @@ export function TableNode({ data }: NodeProps<TableNodeType>) {
               />
             </tr>
           ))}
+          <tr>
+            <td colSpan={4} className="px-2 py-1">
+              <button
+                onClick={() => data.onAddField?.(data.tableId)}
+                className="text-teal-400 text-xs hover:underline"
+              >
+                + field
+              </button>
+            </td>
+          </tr>
         </tbody>
       </table>
     </div>

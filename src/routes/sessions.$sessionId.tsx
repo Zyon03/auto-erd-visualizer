@@ -1,6 +1,9 @@
+import { useState } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
-import { getFullSchemaFn } from '../server-fns/schema'
+import { useServerFn } from '@tanstack/react-start'
+import { getFullSchemaFn, addTableFn, addFieldFn, addRelationshipFn } from '../server-fns/schema'
 import { ErdCanvas } from '../components/erd/ErdCanvas'
+import type { FullSchema } from '../mutations/getFullSchema'
 
 export const Route = createFileRoute('/sessions/$sessionId')({
   loader: ({ params }) => getFullSchemaFn({ data: { sessionId: Number(params.sessionId) } }),
@@ -8,10 +11,54 @@ export const Route = createFileRoute('/sessions/$sessionId')({
 })
 
 function SessionView() {
-  const schema = Route.useLoaderData()
+  const initialSchema = Route.useLoaderData()
+  const { sessionId } = Route.useParams()
+  const [schema, setSchema] = useState<FullSchema>(initialSchema)
+
+  const addTable = useServerFn(addTableFn)
+  const addField = useServerFn(addFieldFn)
+  const addRelationship = useServerFn(addRelationshipFn)
+  const refreshSchema = useServerFn(getFullSchemaFn)
+
+  async function refetch() {
+    setSchema(await refreshSchema({ data: { sessionId: Number(sessionId) } }))
+  }
+
+  async function handleAddTable() {
+    const name = window.prompt('Table name')
+    if (!name) return
+    await addTable({ data: { sessionId: Number(sessionId), name } })
+    await refetch()
+  }
+
+  async function handleAddField(tableId: number) {
+    const name = window.prompt('Field name')
+    if (!name) return
+    const type = window.prompt('Field type (e.g. text, integer, uuid)') ?? 'text'
+    await addField({ data: { tableId, name, type } })
+    await refetch()
+  }
+
+  async function handleConnect(fromFieldId: number, toFieldId: number) {
+    await addRelationship({
+      data: { sessionId: Number(sessionId), fromFieldId, toFieldId, cardinality: 'one-to-many' },
+    })
+    await refetch()
+  }
+
   return (
-    <div className="h-screen w-screen">
-      <ErdCanvas schema={schema} />
+    <div className="h-screen w-screen flex flex-col bg-slate-950">
+      <div className="p-3 border-b border-slate-800">
+        <button
+          onClick={handleAddTable}
+          className="bg-teal-500 text-slate-950 px-3 py-1.5 rounded text-sm font-medium hover:bg-teal-400"
+        >
+          + Add table
+        </button>
+      </div>
+      <div className="flex-1">
+        <ErdCanvas schema={schema} onAddField={handleAddField} onConnect={handleConnect} />
+      </div>
     </div>
   )
 }
