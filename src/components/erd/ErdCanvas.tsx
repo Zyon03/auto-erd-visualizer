@@ -13,12 +13,18 @@ export interface ErdCanvasProps {
   schema: FullSchema
   onAddField: (tableId: number) => void
   onConnect: (fromFieldId: number, toFieldId: number) => void
+  onRenameTable: (tableId: number, name: string) => void
+  onRenameField: (fieldId: number, name: string) => void
 }
 
-export function ErdCanvas({ schema, onAddField, onConnect }: ErdCanvasProps) {
+export function ErdCanvas({ schema, onAddField, onConnect, onRenameTable, onRenameField }: ErdCanvasProps) {
   const nodes = useMemo(
-    () => schemaToNodes(schema).map((node) => ({ ...node, data: { ...node.data, onAddField } })),
-    [schema, onAddField],
+    () =>
+      schemaToNodes(schema).map((node) => ({
+        ...node,
+        data: { ...node.data, onAddField, onRenameTable, onRenameField },
+      })),
+    [schema, onAddField, onRenameTable, onRenameField],
   )
   const edges = useMemo(() => schemaToEdges(schema), [schema])
 

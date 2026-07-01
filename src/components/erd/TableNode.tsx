@@ -1,4 +1,5 @@
-import { Handle, Position, type Node, type NodeProps } from '@xyflow/react'
+import { useState } from 'react'
+import { Handle, Position, type NodeProps } from '@xyflow/react'
 
 export interface TableNodeField {
   id: number
@@ -8,19 +9,51 @@ export interface TableNodeField {
   isForeignKey: boolean
 }
 
-export interface TableNodeData extends Record<string, unknown> {
+export interface TableNodeData {
   tableId: number
   name: string
   fields: TableNodeField[]
   onAddField?: (tableId: number) => void
+  onRenameTable?: (tableId: number, name: string) => void
+  onRenameField?: (fieldId: number, name: string) => void
+  [key: string]: unknown
 }
 
-export type TableNodeType = Node<TableNodeData, 'table'>
+function EditableText({ value, onCommit }: { value: string; onCommit: (next: string) => void }) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(value)
 
-export function TableNode({ data }: NodeProps<TableNodeType>) {
+  if (editing) {
+    return (
+      <input
+        autoFocus
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => {
+          setEditing(false)
+          if (draft.trim() && draft !== value) onCommit(draft.trim())
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+        }}
+        className="bg-slate-950 border border-teal-400 rounded px-1 text-slate-100 w-full"
+      />
+    )
+  }
+
+  return (
+    <span onDoubleClick={() => setEditing(true)} className="cursor-pointer">
+      {value}
+    </span>
+  )
+}
+
+export function TableNode({ data }: NodeProps<TableNodeData>) {
   return (
     <div className="min-w-[180px] rounded-lg border border-slate-700 bg-slate-900 shadow-lg text-sm">
-      <div className="bg-slate-800 text-slate-200 font-semibold px-3 py-1.5 rounded-t-lg">{data.name}</div>
+      <div className="bg-slate-800 text-slate-200 font-semibold px-3 py-1.5 rounded-t-lg">
+        <EditableText value={data.name} onCommit={(next) => data.onRenameTable?.(data.tableId, next)} />
+      </div>
       <table className="w-full">
         <tbody>
           {data.fields.map((field, index) => (
@@ -33,7 +66,9 @@ export function TableNode({ data }: NodeProps<TableNodeType>) {
               />
               <td className="px-2 py-1 w-6 text-amber-400">{field.isPrimaryKey ? '\u{1F511}' : ''}</td>
               <td className="px-2 py-1 w-6 text-teal-400">{field.isForeignKey ? '\u{1F517}' : ''}</td>
-              <td className="px-2 py-1">{field.name}</td>
+              <td className="px-2 py-1">
+                <EditableText value={field.name} onCommit={(next) => data.onRenameField?.(field.id, next)} />
+              </td>
               <td className="px-2 py-1 text-slate-500">{field.type}</td>
               <Handle
                 type="source"

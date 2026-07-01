@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
 import { useServerFn } from '@tanstack/react-start'
-import { getFullSchemaFn, addTableFn, addFieldFn, addRelationshipFn } from '../server-fns/schema'
+import { getFullSchemaFn, addTableFn, addFieldFn, addRelationshipFn, renameTableFn, renameFieldFn } from '../server-fns/schema'
 import { ErdCanvas } from '../components/erd/ErdCanvas'
 import type { FullSchema } from '../mutations/getFullSchema'
 
@@ -18,6 +18,8 @@ function SessionView() {
   const addTable = useServerFn(addTableFn)
   const addField = useServerFn(addFieldFn)
   const addRelationship = useServerFn(addRelationshipFn)
+  const renameTable = useServerFn(renameTableFn)
+  const renameField = useServerFn(renameFieldFn)
   const refreshSchema = useServerFn(getFullSchemaFn)
 
   async function refetch() {
@@ -46,6 +48,16 @@ function SessionView() {
     await refetch()
   }
 
+  async function handleRenameTable(tableId: number, name: string) {
+    await renameTable({ data: { tableId, name } })
+    await refetch()
+  }
+
+  async function handleRenameField(fieldId: number, name: string) {
+    await renameField({ data: { fieldId, name } })
+    await refetch()
+  }
+
   return (
     <div className="h-screen w-screen flex flex-col bg-slate-950">
       <div className="p-3 border-b border-slate-800">
@@ -57,7 +69,13 @@ function SessionView() {
         </button>
       </div>
       <div className="flex-1">
-        <ErdCanvas schema={schema} onAddField={handleAddField} onConnect={handleConnect} />
+        <ErdCanvas
+          schema={schema}
+          onAddField={handleAddField}
+          onConnect={handleConnect}
+          onRenameTable={handleRenameTable}
+          onRenameField={handleRenameField}
+        />
       </div>
     </div>
   )
