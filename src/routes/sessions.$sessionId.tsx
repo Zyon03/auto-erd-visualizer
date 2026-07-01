@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
 import { useServerFn } from '@tanstack/react-start'
 import { getFullSchemaFn, addTableFn, addFieldFn, addRelationshipFn, renameTableFn, renameFieldFn, updateTablePositionFn } from '../server-fns/schema'
+import { exportDdlFn } from '../server-fns/export'
 import { ErdCanvas } from '../components/erd/ErdCanvas'
 import type { FullSchema } from '../mutations/getFullSchema'
 
@@ -22,6 +23,7 @@ function SessionView() {
   const renameField = useServerFn(renameFieldFn)
   const updateTablePosition = useServerFn(updateTablePositionFn)
   const refreshSchema = useServerFn(getFullSchemaFn)
+  const exportDdl = useServerFn(exportDdlFn)
 
   async function refetch() {
     setSchema(await refreshSchema({ data: { sessionId: Number(sessionId) } }))
@@ -63,6 +65,17 @@ function SessionView() {
     await updateTablePosition({ data: { tableId, positionX, positionY } })
   }
 
+  async function handleExport() {
+    const ddl = await exportDdl({ data: { sessionId: Number(sessionId) } })
+    const blob = new Blob([ddl], { type: 'text/sql' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `schema-${sessionId}.sql`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   return (
     <div className="h-screen w-screen flex flex-col bg-slate-950">
       <div className="p-3 border-b border-slate-800">
@@ -71,6 +84,12 @@ function SessionView() {
           className="bg-teal-500 text-slate-950 px-3 py-1.5 rounded text-sm font-medium hover:bg-teal-400"
         >
           + Add table
+        </button>
+        <button
+          onClick={handleExport}
+          className="ml-2 bg-slate-800 text-slate-200 px-3 py-1.5 rounded text-sm font-medium hover:bg-slate-700"
+        >
+          Export SQL
         </button>
       </div>
       <div className="flex-1">
