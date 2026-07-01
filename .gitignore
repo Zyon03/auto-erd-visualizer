@@ -1,9 +1,17 @@
 node_modules/
 dist/
+dist-ssr/
 .output/
 .vinxi/
+.nitro/
+.tanstack/
+.wrangler/
 *.db
 *.sqlite
+*.local
 .env
+.DS_Store
+__unconfig*
+todos.json
 .superpowers/
 .worktrees/
