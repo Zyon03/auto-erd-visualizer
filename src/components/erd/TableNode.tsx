@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Handle, Position, type NodeProps } from '@xyflow/react'
+import { Handle, Position, type Node, type NodeProps } from '@xyflow/react'
 
 export interface TableNodeField {
   id: number
@@ -18,6 +18,8 @@ export interface TableNodeData {
   onRenameField?: (fieldId: number, name: string) => void
   [key: string]: unknown
 }
+
+export type TableNodeType = Node<TableNodeData, 'table'>
 
 function EditableText({ value, onCommit }: { value: string; onCommit: (next: string) => void }) {
   const [editing, setEditing] = useState(false)
@@ -48,7 +50,7 @@ function EditableText({ value, onCommit }: { value: string; onCommit: (next: str
   )
 }
 
-export function TableNode({ data }: NodeProps<TableNodeData>) {
+export function TableNode({ data }: NodeProps<TableNodeType>) {
   return (
     <div className="min-w-[180px] rounded-lg border border-slate-700 bg-slate-900 shadow-lg text-sm">
       <div className="bg-slate-800 text-slate-200 font-semibold px-3 py-1.5 rounded-t-lg">
