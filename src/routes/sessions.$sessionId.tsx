@@ -29,9 +29,7 @@ function SessionView() {
     setSchema(await refreshSchema({ data: { sessionId: Number(sessionId) } }))
   }
 
-  async function handleAddTable() {
-    const name = window.prompt('Table name')
-    if (!name) return
+  async function handleAddTable(name: string) {
     await addTable({ data: { sessionId: Number(sessionId), name } })
     await refetch()
   }
@@ -80,14 +78,8 @@ function SessionView() {
     <div className="h-full w-full flex flex-col bg-slate-950">
       <div className="p-3 border-b border-slate-800">
         <button
-          onClick={handleAddTable}
-          className="bg-teal-500 text-slate-950 px-3 py-1.5 rounded text-sm font-medium hover:bg-teal-400"
-        >
-          + Add table
-        </button>
-        <button
           onClick={handleExport}
-          className="ml-2 bg-slate-800 text-slate-200 px-3 py-1.5 rounded text-sm font-medium hover:bg-slate-700"
+          className="bg-slate-800 text-slate-200 px-3 py-1.5 rounded text-sm font-medium hover:bg-slate-700"
         >
           Export SQL
         </button>
@@ -95,6 +87,7 @@ function SessionView() {
       <div className="flex-1">
         <ErdCanvas
           schema={schema}
+          onAddTable={handleAddTable}
           onAddField={handleAddField}
           onConnect={handleConnect}
           onRenameTable={handleRenameTable}

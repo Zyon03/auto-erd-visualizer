@@ -1,5 +1,14 @@
 import { useEffect, useMemo, useState, useCallback } from 'react'
-import { ReactFlow, Background, applyNodeChanges, type Connection, type Edge, type Node, type NodeChange } from '@xyflow/react'
+import {
+  ReactFlow,
+  Background,
+  Panel,
+  applyNodeChanges,
+  type Connection,
+  type Edge,
+  type Node,
+  type NodeChange,
+} from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { TableNode } from './TableNode'
 import { RelationshipEdge } from './RelationshipEdge'
@@ -12,6 +21,7 @@ const edgeTypes = { relationship: RelationshipEdge }
 
 export interface ErdCanvasProps {
   schema: FullSchema
+  onAddTable: (name: string) => void
   onAddField: (tableId: number) => void
   onConnect: (fromFieldId: number, toFieldId: number) => void
   onRenameTable: (tableId: number, name: string) => void
@@ -19,7 +29,16 @@ export interface ErdCanvasProps {
   onMoveTable: (tableId: number, positionX: number, positionY: number) => void
 }
 
-export function ErdCanvas({ schema, onAddField, onConnect, onRenameTable, onRenameField, onMoveTable }: ErdCanvasProps) {
+export function ErdCanvas({
+  schema,
+  onAddTable,
+  onAddField,
+  onConnect,
+  onRenameTable,
+  onRenameField,
+  onMoveTable,
+}: ErdCanvasProps) {
+  const [newTableName, setNewTableName] = useState('')
   const baseNodes = useMemo(
     () =>
       schemaToNodes(schema).map((node) => ({
@@ -66,6 +85,12 @@ export function ErdCanvas({ schema, onAddField, onConnect, onRenameTable, onRena
     setHoveredEdgeId(null)
   }
 
+  function handleAddTable() {
+    if (!newTableName.trim()) return
+    onAddTable(newTableName.trim())
+    setNewTableName('')
+  }
+
   return (
     <div className="h-full w-full bg-slate-950">
       <ReactFlow
@@ -81,6 +106,21 @@ export function ErdCanvas({ schema, onAddField, onConnect, onRenameTable, onRena
         fitView
       >
         <Background color="#1e293b" gap={24} />
+        <Panel position="top-left" className="flex gap-2">
+          <input
+            value={newTableName}
+            onChange={(e) => setNewTableName(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleAddTable()}
+            placeholder="New table name"
+            className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-slate-200 placeholder:text-slate-600"
+          />
+          <button
+            onClick={handleAddTable}
+            className="bg-teal-500 text-slate-950 px-3 py-1 rounded text-sm font-medium hover:bg-teal-400"
+          >
+            + Add table
+          </button>
+        </Panel>
       </ReactFlow>
     </div>
   )
