@@ -83,7 +83,10 @@ export function createErdTools(db: Db, sessionId: number) {
     }): ErdToolResult => {
       const { relationshipId, ...changes } = input
       const rel = updateRelationship(db, relationshipId, changes)
-      return { summary: `Updated relationship #${rel.id}`, data: rel }
+      return {
+        summary: rel ? `Updated relationship #${rel.id}` : `Relationship #${relationshipId} was already gone`,
+        data: rel,
+      }
     },
 
     delete_relationship: (input: { relationshipId: number }): ErdToolResult => {

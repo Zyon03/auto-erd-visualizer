@@ -60,4 +60,13 @@ describe('createErdTools', () => {
     const result = tools.delete_relationship({ relationshipId: rel.id })
     expect(result.summary).toBe(`Deleted relationship #${rel.id}`)
   })
+
+  it('updates a relationship with a nonexistent relationshipId without throwing', () => {
+    const tools = createErdTools(db, sessionId)
+
+    const result = tools.update_relationship({ relationshipId: 999999, cardinality: 'one-to-one' })
+
+    expect(result.summary).toBe('Relationship #999999 was already gone')
+    expect(result.data).toBeUndefined()
+  })
 })
