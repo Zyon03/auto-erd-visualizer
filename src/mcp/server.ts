@@ -1,0 +1,139 @@
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
+import { z } from 'zod'
+import { createDb } from '../db/client'
+import { createErdTools } from './erdTools'
+
+const sessionId = Number(process.env.ERD_SESSION_ID)
+if (!Number.isInteger(sessionId)) {
+  throw new Error('ERD_SESSION_ID env var must be an integer')
+}
+
+const db = createDb(process.env.DATABASE_PATH ?? './auto-erd.db')
+const tools = createErdTools(db, sessionId)
+
+const server = new McpServer({ name: 'auto-erd', version: '1.0.0' })
+
+const cardinality = z.enum(['one-to-one', 'one-to-many', 'many-to-many'])
+
+function textResult(text: string) {
+  return { content: [{ type: 'text' as const, text }] }
+}
+
+server.registerTool(
+  'get_schema',
+  {
+    title: 'Get schema',
+    description: 'Get the full current ERD schema (tables, fields, relationships) for this session.',
+    inputSchema: {},
+  },
+  async () => textResult(JSON.stringify(tools.get_schema().data)),
+)
+
+server.registerTool(
+  'add_table',
+  { title: 'Add table', description: 'Add a new table to the ERD.', inputSchema: { name: z.string().min(1) } },
+  async (input) => textResult(tools.add_table(input).summary),
+)
+
+server.registerTool(
+  'rename_table',
+  {
+    title: 'Rename table',
+    description: 'Rename an existing table by its id.',
+    inputSchema: { tableId: z.number().int(), name: z.string().min(1) },
+  },
+  async (input) => textResult(tools.rename_table(input).summary),
+)
+
+server.registerTool(
+  'delete_table',
+  {
+    title: 'Delete table',
+    description: 'Delete a table and its fields/relationships by id.',
+    inputSchema: { tableId: z.number().int() },
+  },
+  async (input) => textResult(tools.delete_table(input).summary),
+)
+
+server.registerTool(
+  'add_field',
+  {
+    title: 'Add field',
+    description: 'Add a new field to a table.',
+    inputSchema: {
+      tableId: z.number().int(),
+      name: z.string().min(1),
+      type: z.string().min(1),
+      isPrimaryKey: z.boolean().optional(),
+      isForeignKey: z.boolean().optional(),
+    },
+  },
+  async (input) => textResult(tools.add_field(input).summary),
+)
+
+server.registerTool(
+  'rename_field',
+  {
+    title: 'Rename field',
+    description: 'Rename an existing field by its id.',
+    inputSchema: { fieldId: z.number().int(), name: z.string().min(1) },
+  },
+  async (input) => textResult(tools.rename_field(input).summary),
+)
+
+server.registerTool(
+  'update_field',
+  {
+    title: 'Update field',
+    description: "Update a field's type or primary/foreign key flags.",
+    inputSchema: {
+      fieldId: z.number().int(),
+      type: z.string().min(1).optional(),
+      isPrimaryKey: z.boolean().optional(),
+      isForeignKey: z.boolean().optional(),
+    },
+  },
+  async (input) => textResult(tools.update_field(input).summary),
+)
+
+server.registerTool(
+  'delete_field',
+  { title: 'Delete field', description: 'Delete a field by id.', inputSchema: { fieldId: z.number().int() } },
+  async (input) => textResult(tools.delete_field(input).summary),
+)
+
+server.registerTool(
+  'add_relationship',
+  {
+    title: 'Add relationship',
+    description:
+      'Create a relationship between two fields, with a short plain-language description of what it means (e.g. "A user can place multiple orders, but each order belongs to exactly one user.").',
+    inputSchema: {
+      fromFieldId: z.number().int(),
+      toFieldId: z.number().int(),
+      cardinality,
+      aiComment: z.string().optional(),
+    },
+  },
+  async (input) => textResult(tools.add_relationship(input).summary),
+)
+
+server.registerTool(
+  'update_relationship',
+  {
+    title: 'Update relationship',
+    description: "Update a relationship's cardinality or description.",
+    inputSchema: { relationshipId: z.number().int(), cardinality: cardinality.optional(), aiComment: z.string().optional() },
+  },
+  async (input) => textResult(tools.update_relationship(input).summary),
+)
+
+server.registerTool(
+  'delete_relationship',
+  { title: 'Delete relationship', description: 'Delete a relationship by id.', inputSchema: { relationshipId: z.number().int() } },
+  async (input) => textResult(tools.delete_relationship(input).summary),
+)
+
+const transport = new StdioServerTransport()
+await server.connect(transport)
