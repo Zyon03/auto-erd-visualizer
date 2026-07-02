@@ -1,6 +1,7 @@
 import { HeadContent, Scripts, createRootRoute } from '@tanstack/react-router'
 import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools'
 import { TanStackDevtools } from '@tanstack/react-devtools'
+import { SessionSidebar } from '../components/sidebar/SessionSidebar'
 
 import appCss from '../styles.css?url'
 
@@ -35,7 +36,10 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <HeadContent />
       </head>
       <body className="font-sans antialiased [overflow-wrap:anywhere] selection:bg-[rgba(79,184,178,0.24)]">
-        {children}
+        <div className="flex h-screen w-screen overflow-hidden">
+          <SessionSidebar />
+          <div className="flex-1 h-screen overflow-hidden">{children}</div>
+        </div>
         <TanStackDevtools
           config={{
             position: 'bottom-right',

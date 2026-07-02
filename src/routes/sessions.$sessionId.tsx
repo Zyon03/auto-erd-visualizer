@@ -77,7 +77,7 @@ function SessionView() {
   }
 
   return (
-    <div className="h-screen w-screen flex flex-col bg-slate-950">
+    <div className="h-full w-full flex flex-col bg-slate-950">
       <div className="p-3 border-b border-slate-800">
         <button
           onClick={handleAddTable}
