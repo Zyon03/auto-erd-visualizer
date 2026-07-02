@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import readline from 'node:readline'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import * as schema from '../db/schema'
-import { addChatMessage, listChatMessages } from '../mutations/chatMessages'
+import { addChatMessage, listChatMessages, type ChatMessage } from '../mutations/chatMessages'
 import { getSession, setClaudeSessionId, clearClaudeSessionId } from '../mutations/sessions'
 import { buildMcpConfig } from './buildMcpConfig'
 import { createStreamJsonParser } from './parseStreamJson'
@@ -44,12 +44,16 @@ export function runTurn(
   rawUserMessage: string,
   databasePath: string,
   onEvent: (event: TurnEvent) => void,
-): void {
+): ChatMessage {
   const session = getSession(db, sessionId)
   if (!session) throw new Error(`Session ${sessionId} not found`)
 
+  // Read history and resolve pending system notes BEFORE inserting this turn's user
+  // message -- otherwise this message would immediately become the "last user message"
+  // and resolveTurnMessage's pending-notes window would always be empty.
   const priorMessages = listChatMessages(db, sessionId)
   const resolvedMessage = resolveTurnMessage(priorMessages, rawUserMessage)
+  const userMessageRow = addChatMessage(db, sessionId, 'user', rawUserMessage)
 
   const isFirstTurn = !session.claudeSessionId
   const claudeSessionId = session.claudeSessionId ?? randomUUID()
@@ -141,4 +145,6 @@ export function runTurn(
       )
     }
   })
+
+  return userMessageRow
 }
