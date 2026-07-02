@@ -83,6 +83,7 @@ In every case: whatever tool calls already succeeded stay committed (per-call co
 - **Tool calls render as visible steps** in the chat as they stream in (e.g. *"Added table `users`"*, *"Linked `orders.user_id` → `users.id`"*), followed by the assistant's summary message once the turn completes.
 - Dark theme is unchanged (existing slate background, amber primary-key / teal foreign-key accents).
 - **Manual editing moves off native dialogs:** double-click-to-rename stays, but `window.prompt()`/`window.confirm()` for adding tables/fields and deleting things are replaced with real inline UI — an "+ add field" row inside the table node, a delete affordance on hover, an on-canvas "+ add table" control — consistent with the chat-first, dialog-free feel of the rest of the app.
+- **Relationships are AI-only.** Manual drag-to-connect (the Plan-1 `onConnect` handler that lets a user drag between two field handles to create a relationship) is removed, along with any manual delete-relationship affordance. Edges still render on the canvas and still show the hover tooltip with the AI's plain-language description — they're just read-only from the UI's perspective. Only `add_relationship`/`update_relationship`/`delete_relationship` MCP tool calls (i.e. the AI, driven by chat) can create, change, or remove a relationship. This keeps cardinality and `ai_comment` meaningful — a manually-drawn edge has no natural-language description and no basis for picking one-to-one vs one-to-many vs many-to-many, which is exactly the judgment the AI is there to make.
 
 ## Testing Approach
 
@@ -104,3 +105,4 @@ Additionally out of scope for this pass:
 - Editing/deleting individual chat messages.
 - Multiple concurrent in-flight turns per session (one turn at a time; input is disabled while a turn is running).
 - Cancel button for a running turn (only the timeout ends a hung turn; no user-initiated cancel in this pass).
+- Manual relationship creation/deletion from the UI (drag-to-connect and any delete-edge affordance) — relationships are exclusively AI-managed; see UI / Layout.
