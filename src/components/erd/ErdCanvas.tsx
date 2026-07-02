@@ -22,7 +22,7 @@ const edgeTypes = { relationship: RelationshipEdge }
 export interface ErdCanvasProps {
   schema: FullSchema
   onAddTable: (name: string) => void
-  onAddField: (tableId: number) => void
+  onAddField: (tableId: number, name: string, type: string) => void
   onConnect: (fromFieldId: number, toFieldId: number) => void
   onRenameTable: (tableId: number, name: string) => void
   onRenameField: (fieldId: number, name: string) => void

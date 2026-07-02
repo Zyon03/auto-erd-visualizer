@@ -13,13 +13,58 @@ export interface TableNodeData {
   tableId: number
   name: string
   fields: TableNodeField[]
-  onAddField?: (tableId: number) => void
+  onAddField?: (tableId: number, name: string, type: string) => void
   onRenameTable?: (tableId: number, name: string) => void
   onRenameField?: (fieldId: number, name: string) => void
   [key: string]: unknown
 }
 
 export type TableNodeType = Node<TableNodeData, 'table'>
+
+function AddFieldRow({ tableId, onAdd }: { tableId: number; onAdd: (tableId: number, name: string, type: string) => void }) {
+  const [adding, setAdding] = useState(false)
+  const [name, setName] = useState('')
+  const [type, setType] = useState('text')
+
+  function commit() {
+    if (!name.trim()) return
+    onAdd(tableId, name.trim(), type.trim() || 'text')
+    setName('')
+    setType('text')
+    setAdding(false)
+  }
+
+  if (!adding) {
+    return (
+      <button onClick={() => setAdding(true)} className="text-teal-400 text-xs hover:underline">
+        + field
+      </button>
+    )
+  }
+
+  return (
+    <div className="flex gap-1">
+      <input
+        autoFocus
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        onKeyDown={(e) => e.key === 'Enter' && commit()}
+        placeholder="name"
+        className="w-20 bg-slate-950 border border-teal-400 rounded px-1 text-xs text-slate-100"
+      />
+      <input
+        value={type}
+        onChange={(e) => setType(e.target.value)}
+        onKeyDown={(e) => e.key === 'Enter' && commit()}
+        placeholder="type"
+        className="w-16 bg-slate-950 border border-teal-400 rounded px-1 text-xs text-slate-100"
+      />
+      <button onClick={commit} className="text-teal-400 text-xs hover:underline">
+        add
+      </button>
+    </div>
+  )
+}
 
 function EditableText({ value, onCommit }: { value: string; onCommit: (next: string) => void }) {
   const [editing, setEditing] = useState(false)
@@ -82,12 +127,7 @@ export function TableNode({ data }: NodeProps<TableNodeType>) {
           ))}
           <tr>
             <td colSpan={4} className="px-2 py-1">
-              <button
-                onClick={() => data.onAddField?.(data.tableId)}
-                className="text-teal-400 text-xs hover:underline"
-              >
-                + field
-              </button>
+              <AddFieldRow tableId={data.tableId} onAdd={data.onAddField ?? (() => {})} />
             </td>
           </tr>
         </tbody>

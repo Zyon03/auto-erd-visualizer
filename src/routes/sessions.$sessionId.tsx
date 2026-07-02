@@ -43,10 +43,7 @@ function SessionView() {
     await refetch()
   }
 
-  async function handleAddField(tableId: number) {
-    const name = window.prompt('Field name')
-    if (!name) return
-    const type = window.prompt('Field type (e.g. text, integer, uuid)') ?? 'text'
+  async function handleAddField(tableId: number, name: string, type: string) {
     await addField({ data: { tableId, name, type } })
     await refetch()
   }
