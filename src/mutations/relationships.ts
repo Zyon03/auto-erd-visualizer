@@ -24,6 +24,20 @@ export function addRelationship(
   cardinality: Cardinality,
   aiComment = '',
 ): Relationship {
+  if (fromFieldId === toFieldId) {
+    throw new Error('A field cannot have a relationship with itself.')
+  }
+
+  const existingForSession = db.select().from(relationships).where(eq(relationships.sessionId, sessionId)).all()
+  const isDuplicate = existingForSession.some(
+    (rel) =>
+      (rel.fromFieldId === fromFieldId && rel.toFieldId === toFieldId) ||
+      (rel.fromFieldId === toFieldId && rel.toFieldId === fromFieldId),
+  )
+  if (isDuplicate) {
+    throw new Error('These two fields already have a relationship.')
+  }
+
   const [row] = db
     .insert(relationships)
     .values({ sessionId, fromFieldId, toFieldId, cardinality, aiComment })

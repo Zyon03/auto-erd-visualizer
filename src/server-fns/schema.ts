@@ -4,6 +4,7 @@ import { db } from '../db/client'
 import { getFullSchema } from '../mutations/getFullSchema'
 import { addTable, renameTable, updateTablePosition, deleteTable, getTable } from '../mutations/tables'
 import { addField, renameField, updateField, deleteField, getField } from '../mutations/fields'
+import { addRelationship } from '../mutations/relationships'
 import { addChatMessage } from '../mutations/chatMessages'
 
 export const getFullSchemaFn = createServerFn()
@@ -90,3 +91,16 @@ export const deleteFieldFn = createServerFn({ method: 'POST' })
       addChatMessage(db, table.sessionId, 'system', `Field \`${deleted.name}\` deleted`)
     }
   })
+
+export const addRelationshipFn = createServerFn({ method: 'POST' })
+  .validator(
+    z.object({
+      sessionId: z.number(),
+      fromFieldId: z.number(),
+      toFieldId: z.number(),
+      cardinality: z.enum(['one-to-one', 'one-to-many', 'many-to-many']),
+    }),
+  )
+  .handler(async ({ data }) =>
+    addRelationship(db, data.sessionId, data.fromFieldId, data.toFieldId, data.cardinality),
+  )

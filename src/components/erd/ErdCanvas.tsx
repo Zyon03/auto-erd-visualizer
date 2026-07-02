@@ -91,6 +91,21 @@ export function ErdCanvas({
     setNewTableName('')
   }
 
+  const isValidConnection = useCallback(
+    (connection: Edge | Connection) => {
+      if (!connection.sourceHandle || !connection.targetHandle) return false
+      const fromFieldId = Number(connection.sourceHandle.replace('field-', ''))
+      const toFieldId = Number(connection.targetHandle.replace('field-', ''))
+      if (fromFieldId === toFieldId) return false
+      return !schema.relationships.some(
+        (rel) =>
+          (rel.fromFieldId === fromFieldId && rel.toFieldId === toFieldId) ||
+          (rel.fromFieldId === toFieldId && rel.toFieldId === fromFieldId),
+      )
+    },
+    [schema.relationships],
+  )
+
   return (
     <div className="h-full w-full bg-slate-950">
       <ReactFlow
@@ -100,6 +115,7 @@ export function ErdCanvas({
         edgeTypes={edgeTypes}
         onNodesChange={handleNodesChange}
         onConnect={handleConnect}
+        isValidConnection={isValidConnection}
         onNodeDragStop={handleNodeDragStop}
         onEdgeMouseEnter={handleEdgeMouseEnter}
         onEdgeMouseLeave={handleEdgeMouseLeave}
