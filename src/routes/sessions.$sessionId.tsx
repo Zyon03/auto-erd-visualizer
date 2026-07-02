@@ -3,18 +3,27 @@ import { createFileRoute } from '@tanstack/react-router'
 import { useServerFn } from '@tanstack/react-start'
 import { getFullSchemaFn, addTableFn, addFieldFn, addRelationshipFn, renameTableFn, renameFieldFn, updateTablePositionFn } from '../server-fns/schema'
 import { exportDdlFn } from '../server-fns/export'
+import { listChatMessagesFn } from '../server-fns/chat'
 import { ErdCanvas } from '../components/erd/ErdCanvas'
+import { ChatPanel } from '../components/chat/ChatPanel'
 import type { FullSchema } from '../mutations/getFullSchema'
 
 export const Route = createFileRoute('/sessions/$sessionId')({
-  loader: ({ params }) => getFullSchemaFn({ data: { sessionId: Number(params.sessionId) } }),
+  loader: async ({ params }) => {
+    const sessionId = Number(params.sessionId)
+    const [schema, messages] = await Promise.all([
+      getFullSchemaFn({ data: { sessionId } }),
+      listChatMessagesFn({ data: { sessionId } }),
+    ])
+    return { schema, messages }
+  },
   component: SessionView,
 })
 
 function SessionView() {
-  const initialSchema = Route.useLoaderData()
+  const initialData = Route.useLoaderData()
   const { sessionId } = Route.useParams()
-  const [schema, setSchema] = useState<FullSchema>(initialSchema)
+  const [schema, setSchema] = useState<FullSchema>(initialData.schema)
 
   const addTable = useServerFn(addTableFn)
   const addField = useServerFn(addFieldFn)
@@ -43,10 +52,16 @@ function SessionView() {
   }
 
   async function handleConnect(fromFieldId: number, toFieldId: number) {
-    await addRelationship({
-      data: { sessionId: Number(sessionId), fromFieldId, toFieldId, cardinality: 'one-to-many' },
-    })
-    await refetch()
+    try {
+      await addRelationship({
+        data: { sessionId: Number(sessionId), fromFieldId, toFieldId, cardinality: 'one-to-many' },
+      })
+      await refetch()
+    } catch {
+      // Rejected by a guardrail (self-connection or duplicate pair, see Task 15).
+      // ErdCanvas's isValidConnection already prevents this in the common case;
+      // this catch only matters for a race with a concurrent AI-driven change.
+    }
   }
 
   async function handleRenameTable(tableId: number, name: string) {
@@ -84,7 +99,7 @@ function SessionView() {
           Export SQL
         </button>
       </div>
-      <div className="flex-1">
+      <div className="flex-1 relative">
         <ErdCanvas
           schema={schema}
           onAddTable={handleAddTable}
@@ -94,6 +109,7 @@ function SessionView() {
           onRenameField={handleRenameField}
           onMoveTable={handleMoveTable}
         />
+        <ChatPanel sessionId={Number(sessionId)} initialMessages={initialData.messages} onSchemaMayHaveChanged={refetch} />
       </div>
     </div>
   )
