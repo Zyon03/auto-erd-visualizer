@@ -144,7 +144,7 @@ export function TableNode({ data }: NodeProps<TableNodeType>) {
             </tr>
           ))}
           <tr>
-            <td colSpan={4} className="px-2 py-1">
+            <td colSpan={5} className="px-2 py-1">
               <AddFieldRow tableId={data.tableId} onAdd={data.onAddField ?? (() => {})} />
             </td>
           </tr>
