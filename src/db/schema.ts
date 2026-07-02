@@ -4,6 +4,7 @@ import { sql } from 'drizzle-orm'
 export const sessions = sqliteTable('sessions', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   name: text('name').notNull(),
+  claudeSessionId: text('claude_session_id'),
   createdAt: text('created_at').notNull().default(sql`(current_timestamp)`),
   updatedAt: text('updated_at').notNull().default(sql`(current_timestamp)`),
 })

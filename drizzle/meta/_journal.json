@@ -8,6 +8,13 @@
       "when": 1782903980404,
       "tag": "0000_shocking_omega_flight",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1782961724354,
+      "tag": "0001_sweet_madripoor",
+      "breakpoints": true
     }
   ]
 }
