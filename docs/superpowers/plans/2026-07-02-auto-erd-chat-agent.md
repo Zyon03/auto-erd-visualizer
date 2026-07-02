@@ -13,7 +13,7 @@
 - Personal, local-only tool — no auth, no multi-tenancy (unchanged from Plan 1).
 - Every MCP tool call and every manual UI edit go through the same mutation functions — never duplicate mutation logic.
 - Dark theme: slate background, amber (`text-amber-400`) for primary-key indicators, teal (`text-teal-400`) for foreign-key indicators and relationship lines (unchanged from Plan 1).
-- **Relationships are AI-only.** No task in this plan may add a manual "create relationship" or "delete relationship" UI affordance — only `add_relationship`/`update_relationship`/`delete_relationship` MCP tool calls may touch the `relationships` table from now on.
+- **Relationship creation has guardrails.** Both the AI (via MCP tool calls) and manual drag-to-connect create relationships through the same `addRelationship` mutation function (Task 15 adds validation there so it applies uniformly to both paths): a field may not relate to itself, and two fields may only have one relationship between them (checked in both directions). Self-referencing tables (two different fields on the same table, e.g. `employees.manager_id` → `employees.id`) remain valid.
 - The spawned `claude -p` process must run with `--setting-sources ""` and `--disable-slash-commands` so it does not inherit the developer's personal Claude Code skills/hooks/plugins — confirmed via spike that this eliminates ~9K tokens of irrelevant SessionStart-hook injection per turn.
 - `spawn('claude', args)` works directly on this Windows machine without `shell: true` (confirmed via spike: `claude` resolves to a real `.exe`, not a `.cmd` shim) — do not add `shell: true`.
 - Commit after every task passes its tests.
@@ -1311,7 +1311,7 @@ The integration piece: spawns `claude -p`, enforces the 5-minute idle watchdog, 
 
 **Interfaces:**
 - Consumes: `buildMcpConfig` (Task 8), `createStreamJsonParser` (Task 7), `resolveTurnMessage` (Task 9), `addChatMessage`/`listChatMessages` (Task 3), `getSession`/`setClaudeSessionId`/`clearClaudeSessionId` (Task 2).
-- Produces: `getSessionEmitter(sessionId): EventEmitter`, `publishTurnEvent(sessionId, event)`, `runTurn(db, sessionId, userMessage, databasePath, onEvent)`, type `TurnEvent`.
+- Produces: `getSessionEmitter(sessionId): EventEmitter`, `publishTurnEvent(sessionId, event)`, `runTurn(db, sessionId, userMessage, databasePath, onEvent): ChatMessage`, type `TurnEvent`.
 
 - [ ] **Step 1: Write `src/agent/turnEvents.ts`**
 
@@ -1342,7 +1342,7 @@ import { randomUUID } from 'node:crypto'
 import readline from 'node:readline'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import * as schema from '../db/schema'
-import { addChatMessage, listChatMessages } from '../mutations/chatMessages'
+import { addChatMessage, listChatMessages, type ChatMessage } from '../mutations/chatMessages'
 import { getSession, setClaudeSessionId, clearClaudeSessionId } from '../mutations/sessions'
 import { buildMcpConfig } from './buildMcpConfig'
 import { createStreamJsonParser } from './parseStreamJson'
@@ -1383,12 +1383,16 @@ export function runTurn(
   rawUserMessage: string,
   databasePath: string,
   onEvent: (event: TurnEvent) => void,
-): void {
+): ChatMessage {
   const session = getSession(db, sessionId)
   if (!session) throw new Error(`Session ${sessionId} not found`)
 
+  // Read history and resolve pending system notes BEFORE inserting this turn's user
+  // message -- otherwise this message would immediately become the "last user message"
+  // and resolveTurnMessage's pending-notes window would always be empty.
   const priorMessages = listChatMessages(db, sessionId)
   const resolvedMessage = resolveTurnMessage(priorMessages, rawUserMessage)
+  const userMessageRow = addChatMessage(db, sessionId, 'user', rawUserMessage)
 
   const isFirstTurn = !session.claudeSessionId
   const claudeSessionId = session.claudeSessionId ?? randomUUID()
@@ -1480,8 +1484,12 @@ export function runTurn(
       )
     }
   })
+
+  return userMessageRow
 }
 ```
+
+Note `runTurn` now persists the user's message itself (using the raw, unprefixed text) and returns that row — it no longer relies on the caller to have inserted it first. This is what makes the read-before-insert ordering above correct: the caller (Task 11's `sendMessageFn`) must NOT insert the user message itself; it just calls `runTurn` and uses its return value.
 
 - [ ] **Step 3: Typecheck**
 
@@ -1541,8 +1549,10 @@ git commit -m "feat: add turn orchestrator spawning claude -p per chat turn"
 - Create: `src/server-fns/chat.ts`
 
 **Interfaces:**
-- Consumes: `addChatMessage`/`listChatMessages` (Task 3), `runTurn` (Task 10), `publishTurnEvent` (Task 10).
+- Consumes: `listChatMessages` (Task 3), `runTurn` (Task 10), `publishTurnEvent` (Task 10).
 - Produces: `sendMessageFn`, `listChatMessagesFn`.
+
+**Important:** `runTurn` (Task 10) persists the user's message itself and returns that row — it reads chat history to resolve pending manual-edit system notes *before* inserting the new message, so nothing else may insert that message first. Do **not** call `addChatMessage` for the user's message in this file; just call `runTurn` and return its result.
 
 - [ ] **Step 1: Write `src/server-fns/chat.ts`**
 
@@ -1551,7 +1561,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { z } from 'zod'
 import path from 'node:path'
 import { db } from '../db/client'
-import { addChatMessage, listChatMessages } from '../mutations/chatMessages'
+import { listChatMessages } from '../mutations/chatMessages'
 import { runTurn } from '../agent/runTurn'
 import { publishTurnEvent } from '../agent/turnEvents'
 
@@ -1564,17 +1574,13 @@ export const listChatMessagesFn = createServerFn()
 export const sendMessageFn = createServerFn({ method: 'POST' })
   .validator(z.object({ sessionId: z.number(), content: z.string().min(1) }))
   .handler(async ({ data }) => {
-    const message = addChatMessage(db, data.sessionId, 'user', data.content)
-
-    runTurn(db, data.sessionId, data.content, DATABASE_PATH, (event) => {
+    return runTurn(db, data.sessionId, data.content, DATABASE_PATH, (event) => {
       publishTurnEvent(data.sessionId, event)
     })
-
-    return message
   })
 ```
 
-Note `runTurn` is intentionally not `await`ed — the server function returns as soon as the turn is kicked off, matching the design's "turns survive tab close" requirement. The turn continues running server-side regardless of the HTTP request's lifecycle.
+`runTurn` is a synchronous function (not a Promise): it does its DB reads/writes synchronously (better-sqlite3 is sync), then starts the `claude -p` subprocess and returns immediately — it does not wait for the subprocess to finish. This is what makes "turns survive tab close" work: the server function returns as soon as the turn is kicked off, and the turn continues running server-side regardless of the HTTP request's lifecycle, with progress relayed only through `onEvent`/SSE from then on.
 
 - [ ] **Step 2: Typecheck**
 
@@ -1985,64 +1991,209 @@ git commit -m "feat: replace window.prompt table creation with inline canvas con
 
 ---
 
-### Task 15: Remove manual relationship creation
+### Task 15: Add relationship connection guardrails
 
-Per the design's AI-only relationships decision: drag-to-connect must no longer create relationships. Edges remain fully visible (including hover tooltips from Plan 1) — this task only removes the *creation* path from the UI, and removes the now-unused `addRelationshipFn` import that Task 4 left dangling.
+Manual drag-to-connect relationship creation stays (it was never removed from `ErdCanvas.tsx`/`sessions.$sessionId.tsx` — those still have Plan 1's original `onConnect`/`handleConnect` wiring). What's missing is validation: today, any field can be connected to any other field an unlimited number of times, in either direction, including to itself. This task adds guardrails at the mutation layer — the single place both manual UI edits and AI `add_relationship` tool calls go through — plus a client-side check for immediate feedback during dragging.
+
+Guardrails: a field may not relate to itself, and two fields may only have one relationship between them (checked in both directions — if `users.id → orders.user_id` exists, `orders.user_id → users.id` is also rejected). Self-referencing tables remain valid: two *different* fields on the same table (e.g. `employees.manager_id` and `employees.id`) can still be related.
+
+This task also restores `addRelationshipFn` in `src/server-fns/schema.ts`, which Task 4 removed on the (now-reversed) assumption that relationships would become AI-only — restoring it resolves the one known, deferred typecheck error in `sessions.$sessionId.tsx` that's persisted since Task 4.
 
 **Files:**
+- Modify: `src/mutations/relationships.ts`
+- Modify: `src/server-fns/schema.ts`
 - Modify: `src/components/erd/ErdCanvas.tsx`
-- Modify: `src/routes/sessions.$sessionId.tsx`
+- Test: `tests/mutations/relationships.test.ts`
 
 **Interfaces:**
 - Consumes: nothing new.
-- Produces: `ErdCanvas` with no `onConnect` prop or connect handling; `<ReactFlow>` configured non-connectable.
+- Produces: `addRelationship` now throws an `Error` for self-connections and duplicate field pairs (unchanged signature otherwise); `addRelationshipFn` restored; `ErdCanvas` gains a client-side `isValidConnection` check.
 
-- [ ] **Step 1: Remove connect handling from `ErdCanvas.tsx`**
+- [ ] **Step 1: Write the failing tests**
 
-Remove the `onConnect` prop from `ErdCanvasProps`, remove the `handleConnect` function, remove `onConnect={handleConnect}` from the `<ReactFlow>` element, and add `nodesConnectable={false}` to `<ReactFlow>` so field handles no longer initiate a drag-to-connect gesture at all:
+Read the current `tests/mutations/relationships.test.ts` first, then add `usersTableId` to the `beforeEach` capture and add four new tests. The full file becomes:
 
-```tsx
-      <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        nodeTypes={nodeTypes}
-        edgeTypes={edgeTypes}
-        onNodesChange={handleNodesChange}
-        onNodeDragStop={handleNodeDragStop}
-        onEdgeMouseEnter={handleEdgeMouseEnter}
-        onEdgeMouseLeave={handleEdgeMouseLeave}
-        nodesConnectable={false}
-        fitView
-      >
+```typescript
+import { describe, it, expect, beforeEach } from 'vitest'
+import { createDb } from '../../src/db/client'
+import { createSession } from '../../src/mutations/sessions'
+import { addTable } from '../../src/mutations/tables'
+import { addField } from '../../src/mutations/fields'
+import { addRelationship, updateRelationship, deleteRelationship } from '../../src/mutations/relationships'
+
+describe('relationship mutations', () => {
+  let db: ReturnType<typeof createDb>
+  let sessionId: number
+  let usersTableId: number
+  let userIdField: number
+  let orderUserIdField: number
+
+  beforeEach(() => {
+    db = createDb(':memory:')
+    sessionId = createSession(db, 'Session').id
+    const users = addTable(db, sessionId, 'users')
+    const orders = addTable(db, sessionId, 'orders')
+    usersTableId = users.id
+    userIdField = addField(db, users.id, 'id', 'uuid', true).id
+    orderUserIdField = addField(db, orders.id, 'user_id', 'uuid', false, true).id
+  })
+
+  it('adds a relationship', () => {
+    const rel = addRelationship(db, sessionId, userIdField, orderUserIdField, 'one-to-many', 'A user has many orders')
+    expect(rel.cardinality).toBe('one-to-many')
+    expect(rel.aiComment).toBe('A user has many orders')
+  })
+
+  it('updates a relationship', () => {
+    const rel = addRelationship(db, sessionId, userIdField, orderUserIdField, 'one-to-many')
+    const updated = updateRelationship(db, rel.id, { aiComment: 'Updated comment' })
+    expect(updated.aiComment).toBe('Updated comment')
+  })
+
+  it('deletes a relationship', () => {
+    const rel = addRelationship(db, sessionId, userIdField, orderUserIdField, 'one-to-many')
+    deleteRelationship(db, rel.id)
+    expect(updateRelationship(db, rel.id, { aiComment: 'x' })).toBeUndefined()
+  })
+
+  it('rejects a relationship from a field to itself', () => {
+    expect(() => addRelationship(db, sessionId, userIdField, userIdField, 'one-to-many')).toThrow()
+  })
+
+  it('rejects a duplicate relationship between the same two fields', () => {
+    addRelationship(db, sessionId, userIdField, orderUserIdField, 'one-to-many')
+    expect(() => addRelationship(db, sessionId, userIdField, orderUserIdField, 'one-to-many')).toThrow()
+  })
+
+  it('rejects a duplicate relationship in the reverse direction', () => {
+    addRelationship(db, sessionId, userIdField, orderUserIdField, 'one-to-many')
+    expect(() => addRelationship(db, sessionId, orderUserIdField, userIdField, 'one-to-many')).toThrow()
+  })
+
+  it('allows a self-referencing relationship between two different fields on the same table', () => {
+    const managerIdField = addField(db, usersTableId, 'manager_id', 'uuid', false, true).id
+    expect(() => addRelationship(db, sessionId, userIdField, managerIdField, 'one-to-many')).not.toThrow()
+  })
+})
 ```
 
-Also remove the now-unused `Connection` type import if nothing else in the file uses it.
+(The first three tests are unchanged from Plan 1/Task 5 — only the `beforeEach` and the four new tests at the bottom are new.)
 
-- [ ] **Step 2: Remove connect wiring from `src/routes/sessions.$sessionId.tsx`**
+- [ ] **Step 2: Run tests to verify the four new ones fail**
 
-Remove `handleConnect`, remove `addRelationshipFn`/`addRelationship` import and usage, and remove `onConnect={handleConnect}` from the `<ErdCanvas>` element.
+```bash
+npx vitest run tests/mutations/relationships.test.ts
+```
 
-- [ ] **Step 3: Verify manually**
+Expected: the three pre-existing tests PASS, the four new ones FAIL (no validation exists yet).
+
+- [ ] **Step 3: Add validation to `addRelationship` in `src/mutations/relationships.ts`**
+
+Replace the existing `addRelationship` function with this version (leave `updateRelationship`/`deleteRelationship` untouched):
+
+```typescript
+export function addRelationship(
+  db: Db,
+  sessionId: number,
+  fromFieldId: number,
+  toFieldId: number,
+  cardinality: Cardinality,
+  aiComment = '',
+): Relationship {
+  if (fromFieldId === toFieldId) {
+    throw new Error('A field cannot have a relationship with itself.')
+  }
+
+  const existingForSession = db.select().from(relationships).where(eq(relationships.sessionId, sessionId)).all()
+  const isDuplicate = existingForSession.some(
+    (rel) =>
+      (rel.fromFieldId === fromFieldId && rel.toFieldId === toFieldId) ||
+      (rel.fromFieldId === toFieldId && rel.toFieldId === fromFieldId),
+  )
+  if (isDuplicate) {
+    throw new Error('These two fields already have a relationship.')
+  }
+
+  const [row] = db
+    .insert(relationships)
+    .values({ sessionId, fromFieldId, toFieldId, cardinality, aiComment })
+    .returning()
+    .all()
+  return row
+}
+```
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+```bash
+npx vitest run tests/mutations/relationships.test.ts
+```
+
+Expected: PASS (7 tests total).
+
+- [ ] **Step 5: Restore `addRelationshipFn` in `src/server-fns/schema.ts`**
+
+Add `addRelationship` to the existing `../mutations/relationships` import (it currently only imports types/other functions there — check what's already imported and add to it, don't duplicate the import line), then add:
+
+```typescript
+export const addRelationshipFn = createServerFn({ method: 'POST' })
+  .validator(
+    z.object({
+      sessionId: z.number(),
+      fromFieldId: z.number(),
+      toFieldId: z.number(),
+      cardinality: z.enum(['one-to-one', 'one-to-many', 'many-to-many']),
+    }),
+  )
+  .handler(async ({ data }) =>
+    addRelationship(db, data.sessionId, data.fromFieldId, data.toFieldId, data.cardinality),
+  )
+```
+
+- [ ] **Step 6: Add a client-side `isValidConnection` check to `ErdCanvas.tsx`**
+
+This gives immediate visual feedback during a drag (the connection line won't "snap" if invalid) instead of only failing after a round-trip to the server. Add inside the `ErdCanvas` function body, above the `return`:
+
+```typescript
+  const isValidConnection = useCallback(
+    (connection: Connection) => {
+      if (!connection.sourceHandle || !connection.targetHandle) return false
+      const fromFieldId = Number(connection.sourceHandle.replace('field-', ''))
+      const toFieldId = Number(connection.targetHandle.replace('field-', ''))
+      if (fromFieldId === toFieldId) return false
+      return !schema.relationships.some(
+        (rel) =>
+          (rel.fromFieldId === fromFieldId && rel.toFieldId === toFieldId) ||
+          (rel.fromFieldId === toFieldId && rel.toFieldId === fromFieldId),
+      )
+    },
+    [schema.relationships],
+  )
+```
+
+Add `isValidConnection={isValidConnection}` to the `<ReactFlow>` element (alongside the existing `onConnect={handleConnect}`).
+
+- [ ] **Step 7: Verify manually**
 
 ```bash
 npm run dev
 ```
 
-Seed a demo session (`npx tsx scripts/seed-demo.ts`) and open it. Expected: dragging from one field's handle to another does nothing (no relationship created, no connection line follows the cursor); the existing seeded relationship still renders with its hover tooltip working (from the earlier bug fix). Stop the server.
+Seed a demo session (`npx tsx scripts/seed-demo.ts`, which already creates one `users.id → orders.user_id` relationship) and open it. Expected: dragging to recreate the same connection (in either direction) doesn't visually connect; dragging a field's handle to itself doesn't visually connect; dragging between two fields that aren't yet related still works and persists after reload. Stop the server.
 
-- [ ] **Step 4: Typecheck**
+- [ ] **Step 8: Typecheck**
 
 ```bash
 npm run typecheck
 ```
 
-Expected: no errors, no unused-import warnings.
+Expected: no errors — including the `addRelationshipFn` error in `sessions.$sessionId.tsx` that's been known and deferred since Task 4, since restoring the export resolves it.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add src/components/erd/ErdCanvas.tsx src/routes/sessions.\$sessionId.tsx
-git commit -m "feat: make relationships AI-only, remove manual drag-to-connect"
+git add src/mutations/relationships.ts src/server-fns/schema.ts src/components/erd/ErdCanvas.tsx tests/mutations/relationships.test.ts
+git commit -m "feat: add relationship connection guardrails (no self-links, no duplicate pairs)"
 ```
 
 ---
@@ -2268,7 +2419,7 @@ Final integration task: the session route loads initial chat history, renders `C
 import { createFileRoute } from '@tanstack/react-router'
 import { useState } from 'react'
 import { useServerFn } from '@tanstack/react-start'
-import { getFullSchemaFn, addTableFn, addFieldFn, renameTableFn, renameFieldFn, updateTablePositionFn } from '../server-fns/schema'
+import { getFullSchemaFn, addTableFn, addFieldFn, addRelationshipFn, renameTableFn, renameFieldFn, updateTablePositionFn } from '../server-fns/schema'
 import { exportDdlFn } from '../server-fns/export'
 import { listChatMessagesFn } from '../server-fns/chat'
 import { ErdCanvas } from '../components/erd/ErdCanvas'
@@ -2294,6 +2445,7 @@ function SessionView() {
 
   const addTable = useServerFn(addTableFn)
   const addField = useServerFn(addFieldFn)
+  const addRelationship = useServerFn(addRelationshipFn)
   const renameTable = useServerFn(renameTableFn)
   const renameField = useServerFn(renameFieldFn)
   const updateTablePosition = useServerFn(updateTablePositionFn)
@@ -2315,6 +2467,19 @@ function SessionView() {
     const type = window.prompt('Field type (e.g. text, integer, uuid)') ?? 'text'
     await addField({ data: { tableId, name, type } })
     await refetch()
+  }
+
+  async function handleConnect(fromFieldId: number, toFieldId: number) {
+    try {
+      await addRelationship({
+        data: { sessionId: Number(sessionId), fromFieldId, toFieldId, cardinality: 'one-to-many' },
+      })
+      await refetch()
+    } catch {
+      // Rejected by a guardrail (self-connection or duplicate pair, see Task 15).
+      // ErdCanvas's isValidConnection already prevents this in the common case;
+      // this catch only matters for a race with a concurrent AI-driven change.
+    }
   }
 
   async function handleRenameTable(tableId: number, name: string) {
@@ -2357,6 +2522,7 @@ function SessionView() {
           schema={schema}
           onAddTable={handleAddTable}
           onAddField={handleAddField}
+          onConnect={handleConnect}
           onRenameTable={handleRenameTable}
           onRenameField={handleRenameField}
           onMoveTable={handleMoveTable}
@@ -2368,7 +2534,7 @@ function SessionView() {
 }
 ```
 
-Note `handleAddField` still uses `window.prompt()` for field name/type — that's the existing Plan-1 behavior and out of scope for this plan (only table creation and relationship creation change per the design). `ChatPanel` is positioned inside a `relative` wrapper (`flex-1 relative`) around `ErdCanvas` so its `absolute` positioning is relative to the canvas area, not the whole viewport.
+Note `handleAddField` still uses `window.prompt()` for field name/type — that's the existing Plan-1 behavior and out of scope for this plan (only table creation moves off dialogs per the design; field creation is handled later in Task 18). `ChatPanel` is positioned inside a `relative` wrapper (`flex-1 relative`) around `ErdCanvas` so its `absolute` positioning is relative to the canvas area, not the whole viewport.
 
 - [ ] **Step 2: Manually verify the full loop end to end**
 
@@ -2382,7 +2548,7 @@ From the sidebar, create a new session. Expected: centered "Describe the system 
 - The canvas updates live with new tables as they're created (no manual refresh needed).
 - A final assistant message bubble appears once the turn completes.
 - Relationships the AI creates show up as edges with working hover tooltips.
-- Dragging a table still works (from the earlier bug fix); dragging between field handles does nothing (Task 15).
+- Dragging a table still works (from the earlier bug fix); manually dragging between two unrelated fields creates a relationship, but re-dragging the same pair (either direction) or a field to itself does nothing (Task 15's guardrails).
 
 Send a second message referencing the existing schema (e.g. "actually rename orders to purchases") and confirm the AI's response reflects awareness of the existing tables (proving `--resume` continuity works end to end, not just in the Task 10 spike).
 
@@ -2595,6 +2761,7 @@ export function ErdCanvas({
   schema,
   onAddTable,
   onAddField,
+  onConnect,
   onRenameTable,
   onRenameField,
   onDeleteTable,
