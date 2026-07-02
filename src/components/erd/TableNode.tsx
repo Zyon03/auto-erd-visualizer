@@ -16,6 +16,8 @@ export interface TableNodeData {
   onAddField?: (tableId: number, name: string, type: string) => void
   onRenameTable?: (tableId: number, name: string) => void
   onRenameField?: (fieldId: number, name: string) => void
+  onDeleteTable?: (tableId: number) => void
+  onDeleteField?: (fieldId: number) => void
   [key: string]: unknown
 }
 
@@ -98,13 +100,20 @@ function EditableText({ value, onCommit }: { value: string; onCommit: (next: str
 export function TableNode({ data }: NodeProps<TableNodeType>) {
   return (
     <div className="min-w-[180px] rounded-lg border border-slate-700 bg-slate-900 shadow-lg text-sm">
-      <div className="bg-slate-800 text-slate-200 font-semibold px-3 py-1.5 rounded-t-lg">
+      <div className="group bg-slate-800 text-slate-200 font-semibold px-3 py-1.5 rounded-t-lg flex items-center justify-between">
         <EditableText value={data.name} onCommit={(next) => data.onRenameTable?.(data.tableId, next)} />
+        <button
+          onClick={() => data.onDeleteTable?.(data.tableId)}
+          className="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-red-400 text-xs px-1"
+          title="Delete table"
+        >
+          ×
+        </button>
       </div>
       <table className="w-full">
         <tbody>
           {data.fields.map((field, index) => (
-            <tr key={field.id} className="relative text-slate-300">
+            <tr key={field.id} className="group relative text-slate-300">
               <Handle
                 type="target"
                 id={`field-${field.id}`}
@@ -117,6 +126,15 @@ export function TableNode({ data }: NodeProps<TableNodeType>) {
                 <EditableText value={field.name} onCommit={(next) => data.onRenameField?.(field.id, next)} />
               </td>
               <td className="px-2 py-1 text-slate-500">{field.type}</td>
+              <td className="px-1 py-1 w-4">
+                <button
+                  onClick={() => data.onDeleteField?.(field.id)}
+                  className="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-red-400 text-xs"
+                  title="Delete field"
+                >
+                  ×
+                </button>
+              </td>
               <Handle
                 type="source"
                 id={`field-${field.id}`}

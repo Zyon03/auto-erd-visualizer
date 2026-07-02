@@ -26,6 +26,8 @@ export interface ErdCanvasProps {
   onConnect: (fromFieldId: number, toFieldId: number) => void
   onRenameTable: (tableId: number, name: string) => void
   onRenameField: (fieldId: number, name: string) => void
+  onDeleteTable: (tableId: number) => void
+  onDeleteField: (fieldId: number) => void
   onMoveTable: (tableId: number, positionX: number, positionY: number) => void
 }
 
@@ -36,6 +38,8 @@ export function ErdCanvas({
   onConnect,
   onRenameTable,
   onRenameField,
+  onDeleteTable,
+  onDeleteField,
   onMoveTable,
 }: ErdCanvasProps) {
   const [newTableName, setNewTableName] = useState('')
@@ -43,9 +47,9 @@ export function ErdCanvas({
     () =>
       schemaToNodes(schema).map((node) => ({
         ...node,
-        data: { ...node.data, onAddField, onRenameTable, onRenameField },
+        data: { ...node.data, onAddField, onRenameTable, onRenameField, onDeleteTable, onDeleteField },
       })),
-    [schema, onAddField, onRenameTable, onRenameField],
+    [schema, onAddField, onRenameTable, onRenameField, onDeleteTable, onDeleteField],
   )
   const [nodes, setNodes] = useState<TableNodeType[]>(baseNodes)
   useEffect(() => {

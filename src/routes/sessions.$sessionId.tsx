@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
 import { useServerFn } from '@tanstack/react-start'
-import { getFullSchemaFn, addTableFn, addFieldFn, addRelationshipFn, renameTableFn, renameFieldFn, updateTablePositionFn } from '../server-fns/schema'
+import { getFullSchemaFn, addTableFn, addFieldFn, addRelationshipFn, renameTableFn, renameFieldFn, deleteTableFn, deleteFieldFn, updateTablePositionFn } from '../server-fns/schema'
 import { exportDdlFn } from '../server-fns/export'
 import { listChatMessagesFn } from '../server-fns/chat'
 import { ErdCanvas } from '../components/erd/ErdCanvas'
@@ -30,6 +30,8 @@ function SessionView() {
   const addRelationship = useServerFn(addRelationshipFn)
   const renameTable = useServerFn(renameTableFn)
   const renameField = useServerFn(renameFieldFn)
+  const deleteTable = useServerFn(deleteTableFn)
+  const deleteField = useServerFn(deleteFieldFn)
   const updateTablePosition = useServerFn(updateTablePositionFn)
   const refreshSchema = useServerFn(getFullSchemaFn)
   const exportDdl = useServerFn(exportDdlFn)
@@ -71,6 +73,16 @@ function SessionView() {
     await refetch()
   }
 
+  async function handleDeleteTable(tableId: number) {
+    await deleteTable({ data: { tableId } })
+    await refetch()
+  }
+
+  async function handleDeleteField(fieldId: number) {
+    await deleteField({ data: { fieldId } })
+    await refetch()
+  }
+
   async function handleMoveTable(tableId: number, positionX: number, positionY: number) {
     await updateTablePosition({ data: { tableId, positionX, positionY } })
   }
@@ -104,6 +116,8 @@ function SessionView() {
           onConnect={handleConnect}
           onRenameTable={handleRenameTable}
           onRenameField={handleRenameField}
+          onDeleteTable={handleDeleteTable}
+          onDeleteField={handleDeleteField}
           onMoveTable={handleMoveTable}
         />
         <ChatPanel sessionId={Number(sessionId)} initialMessages={initialData.messages} onSchemaMayHaveChanged={refetch} />
