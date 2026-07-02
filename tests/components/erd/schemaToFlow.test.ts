@@ -10,6 +10,7 @@ const sampleSchema: FullSchema = {
       name: 'users',
       positionX: 10,
       positionY: 20,
+      createdAt: '2026-01-01 00:00:00',
       fields: [{ id: 1, tableId: 1, name: 'id', type: 'uuid', isPrimaryKey: true, isForeignKey: false, order: 0 }],
     },
     {
@@ -18,6 +19,7 @@ const sampleSchema: FullSchema = {
       name: 'orders',
       positionX: 300,
       positionY: 20,
+      createdAt: '2026-01-01 00:00:00',
       fields: [
         { id: 2, tableId: 2, name: 'user_id', type: 'uuid', isPrimaryKey: false, isForeignKey: true, order: 0 },
       ],
@@ -70,6 +72,7 @@ describe('schemaToTableEdges', () => {
           name: 'orders',
           positionX: 300,
           positionY: 20,
+          createdAt: '2026-01-01 00:00:00',
           fields: [
             { id: 2, tableId: 2, name: 'user_id', type: 'uuid', isPrimaryKey: false, isForeignKey: true, order: 0 },
             {
@@ -101,8 +104,8 @@ describe('schemaToTableEdges', () => {
       tables: [
         sampleSchema.tables[0],
         sampleSchema.tables[1],
-        { id: 3, sessionId: 1, name: 'reviews', positionX: 0, positionY: 0, fields: [{ id: 3, tableId: 3, name: 'user_id', type: 'uuid', isPrimaryKey: false, isForeignKey: true, order: 0 }] },
-        { id: 4, sessionId: 1, name: 'sessions', positionX: 0, positionY: 0, fields: [{ id: 4, tableId: 4, name: 'user_id', type: 'uuid', isPrimaryKey: false, isForeignKey: true, order: 0 }] },
+        { id: 3, sessionId: 1, name: 'reviews', positionX: 0, positionY: 0, createdAt: '2026-01-01 00:00:00', fields: [{ id: 3, tableId: 3, name: 'user_id', type: 'uuid', isPrimaryKey: false, isForeignKey: true, order: 0 }] },
+        { id: 4, sessionId: 1, name: 'sessions', positionX: 0, positionY: 0, createdAt: '2026-01-01 00:00:00', fields: [{ id: 4, tableId: 4, name: 'user_id', type: 'uuid', isPrimaryKey: false, isForeignKey: true, order: 0 }] },
       ],
       relationships: [
         { id: 1, sessionId: 1, fromFieldId: 1, toFieldId: 2, cardinality: 'one-to-many', aiComment: '' },

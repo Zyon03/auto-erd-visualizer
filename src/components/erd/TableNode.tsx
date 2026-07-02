@@ -28,6 +28,7 @@ export interface TableNodeData {
   tableId: number
   name: string
   fields: TableNodeField[]
+  createdAt: string
   onAddField?: (tableId: number, name: string, type: string) => void
   onRenameTable?: (tableId: number, name: string) => void
   onRenameField?: (fieldId: number, name: string) => void
@@ -40,6 +41,8 @@ export interface TableNodeData {
   /** Pre-computed by ErdCanvas from the full schema (TableNode only sees this table's own
    *  fields, not the whole schema needed to derive it). */
   summaryLines?: string[]
+  /** Created since the last time this browser viewed this session — see lib/lastViewed.ts. */
+  isNew?: boolean
   [key: string]: unknown
 }
 
@@ -236,7 +239,21 @@ export function TableNode({ data }: NodeProps<TableNodeType>) {
         />
       ))}
       <div className="group flex items-center justify-between rounded-t-lg bg-surface-raised px-3 py-1.5 font-display font-semibold text-ink">
-        <EditableText value={data.name} onCommit={(next) => data.onRenameTable?.(data.tableId, next)} />
+        <div className="flex min-w-0 items-center gap-1.5">
+          <EditableText
+            value={data.name}
+            onCommit={(next) => data.onRenameTable?.(data.tableId, next)}
+            className="truncate"
+          />
+          {data.isNew && (
+            <span
+              className="shrink-0 rounded-full border border-accent/30 bg-accent/15 px-1.5 py-0 font-mono text-[9px] font-medium uppercase tracking-wide text-accent"
+              title="Created since you last viewed this session"
+            >
+              New
+            </span>
+          )}
+        </div>
         <div className="flex items-center gap-0.5">
           <Dialog>
             <DialogTrigger asChild>

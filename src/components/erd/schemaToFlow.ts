@@ -8,7 +8,7 @@ export function schemaToNodes(schema: FullSchema): TableNodeType[] {
     id: String(table.id),
     type: 'table',
     position: { x: table.positionX, y: table.positionY },
-    data: { tableId: table.id, name: table.name, fields: table.fields },
+    data: { tableId: table.id, name: table.name, fields: table.fields, createdAt: table.createdAt },
   }))
 }
 

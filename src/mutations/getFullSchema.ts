@@ -13,6 +13,7 @@ export interface TableWithFields {
   name: string
   positionX: number
   positionY: number
+  createdAt: string
   fields: Field[]
 }
 

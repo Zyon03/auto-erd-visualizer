@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
 import { useServerFn } from '@tanstack/react-start'
-import { Download, PanelBottomClose, PanelBottomOpen } from 'lucide-react'
+import { Download } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   getFullSchemaFn,
@@ -18,11 +18,12 @@ import {
 import { exportDdlFn } from '../server-fns/export'
 import { listChatMessagesFn } from '../server-fns/chat'
 import { getSessionFn, setSessionModelFn } from '../server-fns/sessions'
+import { notifySessionsChanged } from '../lib/sessionListBus'
+import { getLastViewedThreshold, markSessionViewed } from '../lib/lastViewed'
 import { MODEL_OPTIONS } from '../agent/models'
 import { ErdCanvas } from '../components/erd/ErdCanvas'
 import { ChatPanel } from '../components/chat/ChatPanel'
 import { Button } from '../components/ui/button'
-import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../components/ui/select'
 import type { FullSchema } from '../mutations/getFullSchema'
 import type { ChatMessage } from '../mutations/chatMessages'
 
@@ -67,8 +68,13 @@ function SessionContent({
   initialModel: string | null
 }) {
   const [schema, setSchema] = useState<FullSchema>(initialSchema)
-  const [chatVisible, setChatVisible] = useState(true)
   const [model, setModel] = useState<string | null>(initialModel)
+  // Captured once, before markSessionViewed bumps it — tables created anytime during this
+  // visit (including by the AI mid-conversation) stay flagged "new" until the next visit.
+  const [newSinceThreshold] = useState(() => getLastViewedThreshold(sessionId))
+  useEffect(() => {
+    markSessionViewed(sessionId)
+  }, [sessionId])
 
   const addTable = useServerFn(addTableFn)
   const addField = useServerFn(addFieldFn)
@@ -85,6 +91,9 @@ function SessionContent({
 
   async function refetch() {
     setSchema(await refreshSchema({ data: { sessionId } }))
+    // The sidebar's table count/last-updated for this session only refreshes on its own
+    // create/rename/delete actions otherwise — it has no way to know the canvas changed.
+    notifySessionsChanged()
   }
 
   async function handleAddTable(name: string) {
@@ -196,23 +205,6 @@ function SessionContent({
   return (
     <div className="flex h-full w-full flex-col bg-canvas">
       <div className="flex items-center justify-end gap-2 border-b border-line px-3 py-2">
-        <Select value={model ?? DEFAULT_MODEL_VALUE} onValueChange={handleModelChange}>
-          <SelectTrigger className="rounded-md border-line bg-transparent px-2.5 py-1.5 text-ink-muted hover:border-line-strong">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={DEFAULT_MODEL_VALUE}>Default model</SelectItem>
-            {MODEL_OPTIONS.map((option) => (
-              <SelectItem key={option} value={option}>
-                {option}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Button onClick={() => setChatVisible((prev) => !prev)} variant="outline" size="sm">
-          {chatVisible ? <PanelBottomClose size={13} /> : <PanelBottomOpen size={13} />}
-          {chatVisible ? 'Hide chat' : 'Show chat'}
-        </Button>
         <Button onClick={handleExport} variant="outline" size="sm">
           <Download size={13} />
           Export SQL
@@ -221,6 +213,7 @@ function SessionContent({
       <div className="relative flex-1">
         <ErdCanvas
           schema={schema}
+          newSinceThreshold={newSinceThreshold}
           onAddTable={handleAddTable}
           onAddField={handleAddField}
           onConnect={handleConnect}
@@ -235,7 +228,8 @@ function SessionContent({
           sessionId={sessionId}
           initialMessages={initialMessages}
           onSchemaMayHaveChanged={refetch}
-          visible={chatVisible}
+          model={model}
+          onModelChange={handleModelChange}
         />
       </div>
     </div>

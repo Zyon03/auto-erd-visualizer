@@ -28,6 +28,9 @@ type ViewMode = 'fields' | 'relations'
 
 export interface ErdCanvasProps {
   schema: FullSchema
+  /** Tables with a `createdAt` after this get a "New" badge — the last time this browser
+   *  visited this session, so it reflects what changed since you were last looking. */
+  newSinceThreshold: string
   onAddTable: (name: string) => void
   onAddField: (tableId: number, name: string, type: string) => void
   onConnect: (fromFieldId: number, toFieldId: number) => void
@@ -41,6 +44,7 @@ export interface ErdCanvasProps {
 
 export function ErdCanvas({
   schema,
+  newSinceThreshold,
   onAddTable,
   onAddField,
   onConnect,
@@ -67,9 +71,20 @@ export function ErdCanvas({
           onDeleteField,
           hideFieldHandles: viewMode === 'relations',
           summaryLines: summarizeTable(schema, node.data.tableId),
+          isNew: node.data.createdAt > newSinceThreshold,
         },
       })),
-    [schema, onAddField, onRenameTable, onRenameField, onUpdateFieldType, onDeleteTable, onDeleteField, viewMode],
+    [
+      schema,
+      onAddField,
+      onRenameTable,
+      onRenameField,
+      onUpdateFieldType,
+      onDeleteTable,
+      onDeleteField,
+      viewMode,
+      newSinceThreshold,
+    ],
   )
   const [nodes, setNodes] = useState<TableNodeType[]>(baseNodes)
   useEffect(() => {

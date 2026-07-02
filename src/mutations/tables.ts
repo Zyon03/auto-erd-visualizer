@@ -13,6 +13,7 @@ export interface Table {
   positionX: number
   positionY: number
   autoPositioned: boolean
+  createdAt: string
 }
 
 export function addTable(db: Db, sessionId: number, name: string): Table {

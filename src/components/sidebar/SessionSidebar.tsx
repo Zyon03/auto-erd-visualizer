@@ -18,6 +18,7 @@ import {
   AlertDialogAction,
 } from '../ui/alert-dialog'
 import { relativeTime } from '../../lib/relativeTime'
+import { onSessionsChanged } from '../../lib/sessionListBus'
 
 const COLLAPSED_STORAGE_KEY = 'autoerd:sidebar-collapsed'
 
@@ -36,6 +37,8 @@ export function SessionSidebar() {
   useEffect(() => {
     listSessions().then(setSessions)
   }, [])
+
+  useEffect(() => onSessionsChanged(() => listSessions().then(setSessions)), [])
 
   useEffect(() => {
     setCollapsed(localStorage.getItem(COLLAPSED_STORAGE_KEY) === '1')

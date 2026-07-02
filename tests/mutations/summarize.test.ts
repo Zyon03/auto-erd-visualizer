@@ -10,6 +10,7 @@ const schema: FullSchema = {
       name: 'users',
       positionX: 0,
       positionY: 0,
+      createdAt: '2026-01-01 00:00:00',
       fields: [{ id: 1, tableId: 1, name: 'id', type: 'uuid', isPrimaryKey: true, isForeignKey: false, order: 0 }],
     },
     {
@@ -18,6 +19,7 @@ const schema: FullSchema = {
       name: 'orders',
       positionX: 0,
       positionY: 0,
+      createdAt: '2026-01-01 00:00:00',
       fields: [
         { id: 2, tableId: 2, name: 'user_id', type: 'uuid', isPrimaryKey: false, isForeignKey: true, order: 0 },
       ],
@@ -28,6 +30,7 @@ const schema: FullSchema = {
       name: 'tags',
       positionX: 0,
       positionY: 0,
+      createdAt: '2026-01-01 00:00:00',
       fields: [{ id: 3, tableId: 3, name: 'id', type: 'uuid', isPrimaryKey: true, isForeignKey: false, order: 0 }],
     },
   ],
@@ -53,7 +56,9 @@ describe('summarizeTable', () => {
 
   it('returns an empty list for a table with no relationships', () => {
     const isolated: FullSchema = {
-      tables: [{ id: 4, sessionId: 1, name: 'settings', positionX: 0, positionY: 0, fields: [] }],
+      tables: [
+        { id: 4, sessionId: 1, name: 'settings', positionX: 0, positionY: 0, createdAt: '2026-01-01 00:00:00', fields: [] },
+      ],
       relationships: [],
     }
     expect(summarizeTable(isolated, 4)).toEqual([])

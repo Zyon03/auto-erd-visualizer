@@ -19,6 +19,7 @@ export const tables = sqliteTable('tables', {
   positionX: real('position_x').notNull().default(0),
   positionY: real('position_y').notNull().default(0),
   autoPositioned: integer('auto_positioned', { mode: 'boolean' }).notNull().default(true),
+  createdAt: text('created_at').notNull().default(sql`(current_timestamp)`),
 })
 
 export const fields = sqliteTable('fields', {
