@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { createDb } from '../../src/db/client'
 import { createSession } from '../../src/mutations/sessions'
 import { addTable, deleteTable } from '../../src/mutations/tables'
-import { addField, renameField, updateField, deleteField } from '../../src/mutations/fields'
+import { addField, renameField, updateField, deleteField, getField } from '../../src/mutations/fields'
 
 describe('field mutations', () => {
   let db: ReturnType<typeof createDb>
@@ -46,5 +46,18 @@ describe('field mutations', () => {
     const field = addField(db, tableId, 'name', 'text')
     deleteTable(db, tableId)
     expect(updateField(db, field.id, { type: 'text' })).toBeUndefined()
+  })
+
+  it('gets a field by id', () => {
+    const field = addField(db, tableId, 'name', 'text')
+    const found = getField(db, field.id)
+    expect(found?.name).toBe('name')
+  })
+
+  it('returns the deleted field', () => {
+    const field = addField(db, tableId, 'name', 'text')
+    const deleted = deleteField(db, field.id)
+    expect(deleted?.name).toBe('name')
+    expect(getField(db, field.id)).toBeUndefined()
   })
 })

@@ -33,6 +33,11 @@ export function updateTablePosition(db: Db, tableId: number, positionX: number, 
   return row
 }
 
-export function deleteTable(db: Db, tableId: number): void {
-  db.delete(tables).where(eq(tables.id, tableId)).run()
+export function getTable(db: Db, tableId: number): Table | undefined {
+  return db.select().from(tables).where(eq(tables.id, tableId)).get()
+}
+
+export function deleteTable(db: Db, tableId: number): Table | undefined {
+  const [row] = db.delete(tables).where(eq(tables.id, tableId)).returning().all()
+  return row
 }

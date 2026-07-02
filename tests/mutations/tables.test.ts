@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { createDb } from '../../src/db/client'
 import { createSession } from '../../src/mutations/sessions'
-import { addTable, renameTable, updateTablePosition, deleteTable } from '../../src/mutations/tables'
+import { addTable, renameTable, updateTablePosition, deleteTable, getTable } from '../../src/mutations/tables'
 
 describe('table mutations', () => {
   let db: ReturnType<typeof createDb>
@@ -37,5 +37,18 @@ describe('table mutations', () => {
     const table = addTable(db, sessionId, 'users')
     deleteTable(db, table.id)
     expect(addTable(db, sessionId, 'orders').id).not.toBe(table.id)
+  })
+
+  it('gets a table by id', () => {
+    const table = addTable(db, sessionId, 'users')
+    const found = getTable(db, table.id)
+    expect(found?.name).toBe('users')
+  })
+
+  it('returns the deleted table', () => {
+    const table = addTable(db, sessionId, 'users')
+    const deleted = deleteTable(db, table.id)
+    expect(deleted?.name).toBe('users')
+    expect(getTable(db, table.id)).toBeUndefined()
   })
 })

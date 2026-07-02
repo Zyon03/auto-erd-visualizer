@@ -46,6 +46,11 @@ export function updateField(
   return row
 }
 
-export function deleteField(db: Db, fieldId: number): void {
-  db.delete(fields).where(eq(fields.id, fieldId)).run()
+export function getField(db: Db, fieldId: number): Field | undefined {
+  return db.select().from(fields).where(eq(fields.id, fieldId)).get()
+}
+
+export function deleteField(db: Db, fieldId: number): Field | undefined {
+  const [row] = db.delete(fields).where(eq(fields.id, fieldId)).returning().all()
+  return row
 }
