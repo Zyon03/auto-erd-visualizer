@@ -32,7 +32,7 @@ export function RelationshipEdge({
         path={edgePath}
         markerEnd={markerEnd}
         interactionWidth={20}
-        style={{ stroke: '#5eead4', strokeWidth: hovered ? 3 : 2 }}
+        style={{ stroke: 'var(--color-accent)', strokeWidth: hovered ? 2.5 : 1.5, opacity: hovered ? 1 : 0.7 }}
       />
       {hovered && aiComment && (
         <EdgeLabelRenderer>
@@ -43,7 +43,7 @@ export function RelationshipEdge({
               width: 'max-content',
               pointerEvents: 'none',
             }}
-            className="bg-slate-900 border border-teal-400 text-slate-200 text-xs rounded px-2 py-1 max-w-[220px] shadow-lg z-10 whitespace-normal"
+            className="max-w-[220px] whitespace-normal rounded border border-line bg-surface-raised px-2 py-1 text-xs text-ink shadow-lg z-10"
           >
             {aiComment}
           </div>

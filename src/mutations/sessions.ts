@@ -9,6 +9,7 @@ export interface Session {
   id: number
   name: string
   claudeSessionId: string | null
+  model: string | null
   createdAt: string
   updatedAt: string
 }
@@ -22,12 +23,23 @@ export function createSession(db: Db, name: string): Session {
   return row
 }
 
+export function renameSession(db: Db, id: number, name: string): Session {
+  const [row] = db.update(sessions).set({ name }).where(eq(sessions.id, id)).returning().all()
+  return row
+}
+
+export function deleteSession(db: Db, id: number): Session | undefined {
+  const [row] = db.delete(sessions).where(eq(sessions.id, id)).returning().all()
+  return row
+}
+
 export function listSessions(db: Db): SessionSummary[] {
   return db
     .select({
       id: sessions.id,
       name: sessions.name,
       claudeSessionId: sessions.claudeSessionId,
+      model: sessions.model,
       createdAt: sessions.createdAt,
       updatedAt: sessions.updatedAt,
       tableCount: sql<number>`(select count(*) from ${tables} where ${tables.sessionId} = ${sessions.id})`,
@@ -47,5 +59,10 @@ export function setClaudeSessionId(db: Db, sessionId: number, claudeSessionId: s
 
 export function clearClaudeSessionId(db: Db, sessionId: number): Session {
   const [row] = db.update(sessions).set({ claudeSessionId: null }).where(eq(sessions.id, sessionId)).returning().all()
+  return row
+}
+
+export function setSessionModel(db: Db, sessionId: number, model: string | null): Session {
+  const [row] = db.update(sessions).set({ model }).where(eq(sessions.id, sessionId)).returning().all()
   return row
 }

@@ -1,0 +1,20 @@
+Important (Should Fix)
+system-role is overloaded three ways, and resolveTurnMessage can't tell them apart. runTurn writes AI tool-steps (addChatMessage(db, sessionId, 'system', evt.stepText), line 127) and turn-error text (line 115) as system messages — the same role Task 4 uses for manual-edit notes. resolveTurnMessage (Task 9) treats any system message after the last user/assistant message as a pending manual-edit note to bracket-inject into the next prompt. In the happy path this is harmless (a persisted assistant message closes the window). But if a turn ends without a persisted assistant message — a timeout, a mid-stream error, or close code 0 with empty result text — then the next turn prepends that turn's tool-steps and the error string to the user's message, e.g. [Added table users]\n[The AI process exited unexpectedly (code 1).]\n\nadd orders. Injecting an internal error banner as if it were a user-side manual edit is clearly unintended. This is the kind of cross-task interaction a per-task review wouldn't see. Recommend distinguishing tool-step/error rows from manual-edit notes (a distinct marker, a meta column, or only resolving notes authored by the schema server-fns).
+
+ChatPanel.handleSend has no error handling around the awaited sendMessage, so a rejected turn kick-off strands the UI. setTurnInFlight(true) then await sendMessage(...) with no try/finally — if the POST rejects (server error, or runTurn throwing synchronously on a missing session), turnInFlight never resets and the input stays disabled until a full page reload. Note the common failure (spawn of a missing claude binary) recovers fine because it's surfaced async via child.on('error') → SSE turn_error; this only bites the synchronous/network-reject path, but a try/finally resetting turnInFlight is cheap insurance.
+
+The child's stderr pipe is never drained. spawn defaults all three stdio streams to pipe; only child.stdout is consumed (via readline). If claude -p writes more than the OS pipe buffer (~64KB) to stderr over a 5-minute turn, the child can block on the write and hang until the watchdog kills it. Either read/discard child.stderr or set stdio: ['ignore','pipe','ignore'] (or 'inherit' for stderr).
+
+Minor (Nice to Have)
+Leftover contradictory spec bullet. In the design spec's out-of-scope list, line 109 still reads "Manual relationship creation/deletion from the UI … relationships are exclusively AI-managed" — the pre-reversal text — directly contradicting the new line 108 and the whole guardrails decision. Dead doc from the mid-course change; delete line 109.
+
+onSchemaMayHaveChanged() (a full schema refetch round-trip) fires on every tool_step. For a turn that makes many tool calls this is N refetches. Fine functionally and gives the live-update feel, but a debounce would be cheaper. Local-tool scale makes this cosmetic.
+
+Inconsistent "already gone" handling across erdTools. delete_table/delete_field/update_relationship guard against undefined rows, but rename_table/rename_field/update_field will dereference undefined.name on a bad id and throw. Throwing is actually acceptable here (the MCP SDK surfaces it back to Claude as a tool error it can recover from), but the mix of styles is worth normalizing.
+
+Per-tab, non-durable concurrency guard. turnInFlight is client state; after a tab reload mid-turn it resets to false while the server turn is still running, letting the user launch a second concurrent claude -p --resume against the same session. This is explicitly out of scope per the spec, so noting only — the guard just doesn't survive remount.
+
+Recommendations
+Address items 1–3 before the user's manual E2E pass — they're most likely to surface as "the chat got stuck" or "the AI said something weird after an error," which are hard to diagnose live. Item 1 in particular is the one genuine cross-task defect here.
+Delete the contradictory spec bullet (item 4) so the spec matches the shipped behavior.
+Consider a lightweight SSE heartbeat/comment ping if you ever see idle disconnects, though it's unlikely to matter locally.

@@ -8,6 +8,7 @@ import { getSession, setClaudeSessionId, clearClaudeSessionId } from '../mutatio
 import { buildMcpConfig } from './buildMcpConfig'
 import { createStreamJsonParser } from './parseStreamJson'
 import { resolveTurnMessage } from './resolveTurnMessage'
+import { registerRunningTurn, clearRunningTurn } from './runningTurns'
 
 type Db = BetterSQLite3Database<typeof schema>
 
@@ -35,6 +36,7 @@ const ALLOWED_TOOLS = [
 
 export type TurnEvent =
   | { type: 'tool_step'; toolName: string; stepText: string }
+  | { type: 'assistant_note'; text: string }
   | { type: 'turn_complete'; text: string }
   | { type: 'turn_error'; message: string }
 
@@ -83,12 +85,24 @@ export function runTurn(
     SYSTEM_PROMPT,
   ]
 
+  if (session.model) {
+    args.push('--model', session.model)
+  }
+
   const child = spawn('claude', args, { cwd: process.cwd() })
   const parser = createStreamJsonParser()
   const rl = readline.createInterface({ input: child.stdout })
 
   let streamedAnything = false
   let settled = false
+  let cancelledByUser = false
+
+  registerRunningTurn(sessionId, {
+    cancel: () => {
+      cancelledByUser = true
+      child.kill('SIGTERM')
+    },
+  })
 
   const watchdog = setTimeout(() => {
     if (settled) return
@@ -104,8 +118,9 @@ export function runTurn(
     if (settled) return
     settled = true
     clearTimeout(watchdog)
+    clearRunningTurn(sessionId)
 
-    if (event.type === 'turn_error' && !streamedAnything) {
+    if (event.type === 'turn_error' && !streamedAnything && !cancelledByUser) {
       clearClaudeSessionId(db, sessionId)
     }
 
@@ -126,6 +141,10 @@ export function runTurn(
       if (evt.kind === 'tool_step') {
         addChatMessage(db, sessionId, 'system', evt.stepText)
         onEvent({ type: 'tool_step', toolName: evt.toolName, stepText: evt.stepText })
+      } else if (evt.kind === 'assistant_text') {
+        // Transient narration, not a durable log entry — published over SSE only, never
+        // written to chat_messages (unlike tool_step's system notes or the final turn_complete).
+        onEvent({ type: 'assistant_note', text: evt.text })
       } else if (evt.kind === 'turn_result') {
         finish(evt.success ? { type: 'turn_complete', text: evt.text } : { type: 'turn_error', message: evt.text || 'The AI turn ended with an error.' })
       }
@@ -137,13 +156,16 @@ export function runTurn(
   })
 
   child.on('close', (code) => {
-    if (!settled) {
-      finish(
-        code === 0
-          ? { type: 'turn_complete', text: '' }
-          : { type: 'turn_error', message: `The AI process exited unexpectedly (code ${code}).` },
-      )
+    if (settled) return
+    if (cancelledByUser) {
+      finish({ type: 'turn_error', message: 'Stopped.' })
+      return
     }
+    finish(
+      code === 0
+        ? { type: 'turn_complete', text: '' }
+        : { type: 'turn_error', message: `The AI process exited unexpectedly (code ${code}).` },
+    )
   })
 
   return userMessageRow

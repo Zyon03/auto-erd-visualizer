@@ -5,6 +5,7 @@ export const sessions = sqliteTable('sessions', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   name: text('name').notNull(),
   claudeSessionId: text('claude_session_id'),
+  model: text('model'),
   createdAt: text('created_at').notNull().default(sql`(current_timestamp)`),
   updatedAt: text('updated_at').notNull().default(sql`(current_timestamp)`),
 })
@@ -17,6 +18,7 @@ export const tables = sqliteTable('tables', {
   name: text('name').notNull(),
   positionX: real('position_x').notNull().default(0),
   positionY: real('position_y').notNull().default(0),
+  autoPositioned: integer('auto_positioned', { mode: 'boolean' }).notNull().default(true),
 })
 
 export const fields = sqliteTable('fields', {

@@ -1,12 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
 import { useServerFn } from '@tanstack/react-start'
-import { sendMessageFn } from '../../server-fns/chat'
+import { Send, Square } from 'lucide-react'
+import { sendMessageFn, cancelTurnFn } from '../../server-fns/chat'
 import { useSessionEvents } from '../../hooks/useSessionEvents'
 import { ChatMessageBubble } from './ChatMessageBubble'
+import { Button } from '../ui/button'
 import type { ChatMessage } from '../../mutations/chatMessages'
 
 type TurnEvent =
   | { type: 'tool_step'; toolName: string; stepText: string }
+  | { type: 'assistant_note'; text: string }
   | { type: 'turn_complete'; text: string }
   | { type: 'turn_error'; message: string }
 
@@ -14,12 +17,16 @@ export interface ChatPanelProps {
   sessionId: number
   initialMessages: ChatMessage[]
   onSchemaMayHaveChanged: () => void
+  /** Visually hides the panel without unmounting it, so the SSE subscription (and
+   *  therefore live ERD updates from the AI) keeps running while the chat is tucked away. */
+  visible?: boolean
 }
 
-export function ChatPanel({ sessionId, initialMessages, onSchemaMayHaveChanged }: ChatPanelProps) {
+export function ChatPanel({ sessionId, initialMessages, onSchemaMayHaveChanged, visible = true }: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages)
   const [draft, setDraft] = useState('')
   const [turnInFlight, setTurnInFlight] = useState(false)
+  const [workingNote, setWorkingNote] = useState<string | null>(null)
   const nextLocalId = useRef(-1)
 
   useEffect(() => {
@@ -27,16 +34,21 @@ export function ChatPanel({ sessionId, initialMessages, onSchemaMayHaveChanged }
   }, [sessionId])
 
   const sendMessage = useServerFn(sendMessageFn)
+  const cancelTurn = useServerFn(cancelTurnFn)
 
-  useSessionEvents(sessionId, (raw) => {
+  const eventsStatus = useSessionEvents(sessionId, (raw) => {
     const event = raw as TurnEvent
     if (event.type === 'tool_step') {
+      setWorkingNote(null)
       setMessages((prev) => [
         ...prev,
         { id: nextLocalId.current--, sessionId, role: 'system', content: event.stepText, createdAt: '' },
       ])
       onSchemaMayHaveChanged()
+    } else if (event.type === 'assistant_note') {
+      setWorkingNote(event.text)
     } else if (event.type === 'turn_complete') {
+      setWorkingNote(null)
       if (event.text) {
         setMessages((prev) => [
           ...prev,
@@ -46,6 +58,7 @@ export function ChatPanel({ sessionId, initialMessages, onSchemaMayHaveChanged }
       setTurnInFlight(false)
       onSchemaMayHaveChanged()
     } else if (event.type === 'turn_error') {
+      setWorkingNote(null)
       setMessages((prev) => [
         ...prev,
         { id: nextLocalId.current--, sessionId, role: 'system', content: event.message, createdAt: '' },
@@ -59,17 +72,25 @@ export function ChatPanel({ sessionId, initialMessages, onSchemaMayHaveChanged }
     if (!content || turnInFlight) return
     setDraft('')
     setTurnInFlight(true)
+    setWorkingNote(null)
     const message = await sendMessage({ data: { sessionId, content } })
     setMessages((prev) => [...prev, message])
+  }
+
+  function handleStop() {
+    cancelTurn({ data: { sessionId } })
   }
 
   const hasMessages = messages.length > 0
 
   if (!hasMessages) {
     return (
-      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-        <div className="w-full max-w-lg px-6 pointer-events-auto">
-          <p className="text-center text-slate-400 mb-3 text-sm">Describe the system you want to model...</p>
+      <div
+        className="pointer-events-none absolute inset-0 flex items-center justify-center"
+        style={{ display: visible ? undefined : 'none' }}
+      >
+        <div className="pointer-events-auto w-full max-w-lg px-6">
+          <p className="mb-3 text-center text-sm text-ink-muted">Describe the system you want to model...</p>
           <div className="flex gap-2">
             <input
               autoFocus
@@ -77,15 +98,12 @@ export function ChatPanel({ sessionId, initialMessages, onSchemaMayHaveChanged }
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSend()}
               placeholder="e.g. Users can place orders, each order has multiple items..."
-              className="flex-1 bg-slate-900/90 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600"
+              className="flex-1 rounded-lg border border-line bg-surface/90 px-3 py-2 text-sm text-ink placeholder:text-ink-faint outline-none focus-visible:border-accent"
             />
-            <button
-              onClick={handleSend}
-              disabled={turnInFlight}
-              className="bg-teal-500 text-slate-950 px-4 py-2 rounded-lg text-sm font-medium hover:bg-teal-400 disabled:opacity-50"
-            >
+            <Button onClick={handleSend} disabled={turnInFlight}>
+              <Send size={14} />
               Send
-            </button>
+            </Button>
           </div>
         </div>
       </div>
@@ -93,29 +111,46 @@ export function ChatPanel({ sessionId, initialMessages, onSchemaMayHaveChanged }
   }
 
   return (
-    <div className="absolute bottom-4 left-1/2 -translate-x-1/2 w-full max-w-xl px-4 pointer-events-none">
-      <div className="pointer-events-auto rounded-xl border border-teal-400/25 bg-slate-950/55 backdrop-blur-md shadow-lg overflow-hidden">
-        <div className="max-h-64 overflow-y-auto px-3 pt-3 space-y-2 [mask-image:linear-gradient(to_bottom,transparent,black_16px)]">
+    <div
+      className="pointer-events-none absolute bottom-4 left-1/2 w-full max-w-xl -translate-x-1/2 px-4"
+      style={{ display: visible ? undefined : 'none' }}
+    >
+      <div className="pointer-events-auto overflow-hidden rounded-xl border border-line bg-surface/70 shadow-2xl backdrop-blur-md">
+        <div className="max-h-64 space-y-2 overflow-y-auto px-3 pt-3 [mask-image:linear-gradient(to_bottom,transparent,black_16px)]">
           {messages.map((message) => (
             <ChatMessageBubble key={message.id} message={message} />
           ))}
         </div>
-        <div className="flex gap-2 p-3">
+        {workingNote && (
+          <div className="flex items-center gap-1.5 px-4 pt-2 text-xs italic text-ink-faint">
+            <span className="h-1 w-1 shrink-0 animate-pulse rounded-full bg-accent" aria-hidden />
+            <span className="truncate">{workingNote}</span>
+          </div>
+        )}
+        <div className="flex items-center gap-2 p-3">
+          <span
+            className={`h-1.5 w-1.5 shrink-0 rounded-full ${eventsStatus === 'open' ? 'bg-mint' : 'bg-rose'}`}
+            title={eventsStatus === 'open' ? 'Live updates connected' : 'Live updates paused'}
+          />
           <input
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSend()}
             disabled={turnInFlight}
             placeholder={turnInFlight ? 'Thinking...' : 'Message the AI...'}
-            className="flex-1 bg-slate-900/80 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 disabled:opacity-50"
+            className="flex-1 rounded-lg border border-line bg-inset/80 px-3 py-2 text-sm text-ink placeholder:text-ink-faint outline-none focus-visible:border-accent disabled:opacity-50"
           />
-          <button
-            onClick={handleSend}
-            disabled={turnInFlight}
-            className="bg-teal-500 text-slate-950 px-4 py-2 rounded-lg text-sm font-medium hover:bg-teal-400 disabled:opacity-50"
-          >
-            Send
-          </button>
+          {turnInFlight ? (
+            <Button onClick={handleStop} variant="outline">
+              <Square size={12} />
+              Stop
+            </Button>
+          ) : (
+            <Button onClick={handleSend}>
+              <Send size={14} />
+              Send
+            </Button>
+          )}
         </div>
       </div>
     </div>

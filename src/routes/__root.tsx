@@ -1,6 +1,7 @@
 import { HeadContent, Scripts, createRootRoute } from '@tanstack/react-router'
 import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools'
 import { TanStackDevtools } from '@tanstack/react-devtools'
+import { Toaster } from 'sonner'
 import { SessionSidebar } from '../components/sidebar/SessionSidebar'
 
 import appCss from '../styles.css?url'
@@ -35,11 +36,21 @@ function RootDocument({ children }: { children: React.ReactNode }) {
       <head>
         <HeadContent />
       </head>
-      <body className="font-sans antialiased [overflow-wrap:anywhere] selection:bg-[rgba(79,184,178,0.24)]">
+      <body className="font-sans antialiased [overflow-wrap:anywhere] bg-canvas text-ink">
         <div className="flex h-screen w-screen overflow-hidden">
           <SessionSidebar />
           <div className="flex-1 h-screen overflow-hidden">{children}</div>
         </div>
+        <Toaster
+          theme="dark"
+          position="bottom-right"
+          toastOptions={{
+            classNames: {
+              toast: '!bg-surface-raised !border !border-line !text-ink !font-sans',
+              description: '!text-ink-muted',
+            },
+          }}
+        />
         <TanStackDevtools
           config={{
             position: 'bottom-right',

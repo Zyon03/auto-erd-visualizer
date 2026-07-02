@@ -5,8 +5,8 @@ import { addField } from '../src/mutations/fields'
 import { addRelationship } from '../src/mutations/relationships'
 
 const session = createSession(db, 'Demo')
-const users = addTable(db, session.id, 'users', 40, 40)
-const orders = addTable(db, session.id, 'orders', 340, 160)
+const users = addTable(db, session.id, 'users')
+const orders = addTable(db, session.id, 'orders')
 const userId = addField(db, users.id, 'id', 'uuid', true)
 addField(db, users.id, 'name', 'text')
 const orderUserId = addField(db, orders.id, 'user_id', 'uuid', false, true)

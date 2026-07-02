@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { createDb } from '../../src/db/client'
 import { createSession } from '../../src/mutations/sessions'
-import { addTable } from '../../src/mutations/tables'
+import { addTable, updateTablePosition, getTable } from '../../src/mutations/tables'
 import { addField } from '../../src/mutations/fields'
 import { addRelationship, updateRelationship, deleteRelationship } from '../../src/mutations/relationships'
 
@@ -9,6 +9,7 @@ describe('relationship mutations', () => {
   let db: ReturnType<typeof createDb>
   let sessionId: number
   let usersTableId: number
+  let ordersTableId: number
   let userIdField: number
   let orderUserIdField: number
 
@@ -18,6 +19,7 @@ describe('relationship mutations', () => {
     const users = addTable(db, sessionId, 'users')
     const orders = addTable(db, sessionId, 'orders')
     usersTableId = users.id
+    ordersTableId = orders.id
     userIdField = addField(db, users.id, 'id', 'uuid', true).id
     orderUserIdField = addField(db, orders.id, 'user_id', 'uuid', false, true).id
   })
@@ -57,5 +59,24 @@ describe('relationship mutations', () => {
   it('allows a self-referencing relationship between two different fields on the same table', () => {
     const managerIdField = addField(db, usersTableId, 'manager_id', 'uuid', false, true).id
     expect(() => addRelationship(db, sessionId, userIdField, managerIdField, 'one-to-many')).not.toThrow()
+  })
+
+  it('moves the FK-holding table near the table it references', () => {
+    addRelationship(db, sessionId, userIdField, orderUserIdField, 'one-to-many')
+
+    const users = getTable(db, usersTableId)!
+    const orders = getTable(db, ordersTableId)!
+    const distance = Math.hypot(orders.positionX - users.positionX, orders.positionY - users.positionY)
+    expect(distance).toBeLessThan(400)
+  })
+
+  it('does not move a table that has already been manually positioned', () => {
+    updateTablePosition(db, ordersTableId, 900, 900)
+
+    addRelationship(db, sessionId, userIdField, orderUserIdField, 'one-to-many')
+
+    const orders = getTable(db, ordersTableId)!
+    expect(orders.positionX).toBe(900)
+    expect(orders.positionY).toBe(900)
   })
 })

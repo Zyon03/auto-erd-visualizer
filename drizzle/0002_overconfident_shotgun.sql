@@ -1,0 +1,1 @@
+ALTER TABLE `tables` ADD `auto_positioned` integer DEFAULT true NOT NULL;

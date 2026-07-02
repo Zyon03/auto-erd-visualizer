@@ -1,7 +1,10 @@
 import { eq } from 'drizzle-orm'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import * as schema from '../db/schema'
-import { relationships } from '../db/schema'
+import { relationships, tables } from '../db/schema'
+import { getField } from './fields'
+import { placeTableIfAutoPositioned } from './tables'
+import { positionNear } from './layout'
 
 type Db = BetterSQLite3Database<typeof schema>
 
@@ -43,6 +46,9 @@ export function addRelationship(
     .values({ sessionId, fromFieldId, toFieldId, cardinality, aiComment })
     .returning()
     .all()
+
+  moveForeignKeyTableNearReference(db, sessionId, fromFieldId, toFieldId)
+
   return row
 }
 
@@ -62,4 +68,32 @@ export function updateRelationship(
 
 export function deleteRelationship(db: Db, relationshipId: number): void {
   db.delete(relationships).where(eq(relationships.id, relationshipId)).run()
+}
+
+/** Nudges the FK-holding table's side of a new relationship closer to the table it references,
+ *  unless it's already been manually positioned (see `placeTableIfAutoPositioned`). The
+ *  relationship's `fromFieldId`/`toFieldId` order isn't a reliable signal for which side holds
+ *  the FK — manual drag-to-connect sets it by drag direction, not schema semantics — so this
+ *  uses each field's own `isForeignKey` flag instead, falling back to `toField`'s table (the
+ *  AI's typical creation order) if the flag is ambiguous. */
+function moveForeignKeyTableNearReference(db: Db, sessionId: number, fromFieldId: number, toFieldId: number) {
+  const fromField = getField(db, fromFieldId)
+  const toField = getField(db, toFieldId)
+  if (!fromField || !toField || fromField.tableId === toField.tableId) return
+
+  const fromIsForeignKey = fromField.isForeignKey && !toField.isForeignKey
+  const movingTableId = fromIsForeignKey ? fromField.tableId : toField.tableId
+  const referenceTableId = fromIsForeignKey ? toField.tableId : fromField.tableId
+
+  const tablePositions = db
+    .select({ id: tables.id, positionX: tables.positionX, positionY: tables.positionY })
+    .from(tables)
+    .where(eq(tables.sessionId, sessionId))
+    .all()
+
+  const reference = tablePositions.find((t) => t.id === referenceTableId)
+  if (!reference) return
+
+  const { positionX, positionY } = positionNear(reference, tablePositions, movingTableId)
+  placeTableIfAutoPositioned(db, movingTableId, positionX, positionY)
 }

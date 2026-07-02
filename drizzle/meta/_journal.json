@@ -15,6 +15,20 @@
       "when": 1782961724354,
       "tag": "0001_sweet_madripoor",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1782979550424,
+      "tag": "0002_overconfident_shotgun",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1782981108555,
+      "tag": "0003_fat_tana_nile",
+      "breakpoints": true
     }
   ]
 }
