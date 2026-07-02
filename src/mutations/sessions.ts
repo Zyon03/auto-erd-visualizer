@@ -8,6 +8,7 @@ type Db = BetterSQLite3Database<typeof schema>
 export interface Session {
   id: number
   name: string
+  claudeSessionId: string | null
   createdAt: string
   updatedAt: string
 }
@@ -26,6 +27,7 @@ export function listSessions(db: Db): SessionSummary[] {
     .select({
       id: sessions.id,
       name: sessions.name,
+      claudeSessionId: sessions.claudeSessionId,
       createdAt: sessions.createdAt,
       updatedAt: sessions.updatedAt,
       tableCount: sql<number>`(select count(*) from ${tables} where ${tables.sessionId} = ${sessions.id})`,
@@ -36,4 +38,14 @@ export function listSessions(db: Db): SessionSummary[] {
 
 export function getSession(db: Db, id: number): Session | undefined {
   return db.select().from(sessions).where(eq(sessions.id, id)).get()
+}
+
+export function setClaudeSessionId(db: Db, sessionId: number, claudeSessionId: string): Session {
+  const [row] = db.update(sessions).set({ claudeSessionId }).where(eq(sessions.id, sessionId)).returning().all()
+  return row
+}
+
+export function clearClaudeSessionId(db: Db, sessionId: number): Session {
+  const [row] = db.update(sessions).set({ claudeSessionId: null }).where(eq(sessions.id, sessionId)).returning().all()
+  return row
 }

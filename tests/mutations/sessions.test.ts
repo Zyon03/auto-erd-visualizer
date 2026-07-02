@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { createDb } from '../../src/db/client'
-import { createSession, listSessions, getSession } from '../../src/mutations/sessions'
+import { createSession, listSessions, getSession, setClaudeSessionId, clearClaudeSessionId } from '../../src/mutations/sessions'
 
 describe('session mutations', () => {
   let db: ReturnType<typeof createDb>
@@ -30,5 +30,16 @@ describe('session mutations', () => {
 
   it('returns undefined for a missing session', () => {
     expect(getSession(db, 999)).toBeUndefined()
+  })
+
+  it('sets and clears the claude session id', () => {
+    const session = createSession(db, 'Session C')
+    expect(session.claudeSessionId).toBeNull()
+
+    const withId = setClaudeSessionId(db, session.id, 'abc-123')
+    expect(withId.claudeSessionId).toBe('abc-123')
+
+    const cleared = clearClaudeSessionId(db, session.id)
+    expect(cleared.claudeSessionId).toBeNull()
   })
 })
