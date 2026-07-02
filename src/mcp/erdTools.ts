@@ -93,6 +93,16 @@ export function createErdTools(db: Db, sessionId: number) {
       deleteRelationship(db, input.relationshipId)
       return { summary: `Deleted relationship #${input.relationshipId}` }
     },
+
+    // Doesn't mutate the schema — purely a signal the app renders as a clickable question. The
+    // summary doubles as an instruction back to the model, since this is the only way to make a
+    // single headless `claude -p` invocation "pause": stop calling tools and let the turn end.
+    ask_question: (input: { question: string; choices?: string[]; allowMultiple?: boolean }): ErdToolResult => {
+      return {
+        summary: 'Question presented to the user. Wait for their reply before continuing — do not call more tools this turn.',
+        data: input,
+      }
+    },
   }
 }
 

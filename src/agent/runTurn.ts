@@ -17,6 +17,7 @@ import { buildMcpConfig } from "./buildMcpConfig";
 import { createStreamJsonParser } from "./parseStreamJson";
 import { resolveTurnMessage } from "./resolveTurnMessage";
 import { registerRunningTurn, clearRunningTurn } from "./runningTurns";
+import { encodeQuestion } from "./questionMessage";
 
 type Db = BetterSQLite3Database<typeof schema>;
 
@@ -35,6 +36,14 @@ const SYSTEM_PROMPT =
   "reference data (relatively static lookup entities, e.g. M_User, M_Product, M_Category) and `T_` for " +
   "transactional data (records of events or activity, e.g. T_Order, T_Payment, T_LoginLog). If a table is a " +
   "many-to-many join table, name it after the two things it connects (e.g. T_OrderItem).\n\n" +
+  "Clarifying questions: use ask_question when a requirement is genuinely ambiguous and the decision " +
+  "meaningfully shapes the schema — e.g. a cardinality that could reasonably go either way, whether " +
+  "something needs soft-deletes or an audit trail, whether a repeated value should be normalized into its " +
+  "own lookup table. Lean toward asking while the schema is still sparse and the overall shape is being " +
+  "decided; lean toward just building once the shape is established and what's left is mechanical. Don't " +
+  "ask about things you can reasonably infer from context — every question has a cost, so only spend it on " +
+  "decisions that actually change what gets built. After calling ask_question, stop: do not call any more " +
+  "tools this turn, and let your turn end so the user can reply.\n\n" +
   "You have no capabilities beyond the provided erd tools in this session.";
 
 const ALLOWED_TOOLS = [
@@ -49,11 +58,13 @@ const ALLOWED_TOOLS = [
   "mcp__erd__add_relationship",
   "mcp__erd__update_relationship",
   "mcp__erd__delete_relationship",
+  "mcp__erd__ask_question",
 ].join(",");
 
 export type TurnEvent =
   | { type: "tool_step"; toolName: string; stepText: string }
   | { type: "assistant_note"; text: string }
+  | { type: "ask_question"; question: string; choices: string[]; allowMultiple: boolean }
   | { type: "turn_complete"; text: string }
   | { type: "turn_error"; message: string };
 
@@ -170,6 +181,21 @@ export function runTurn(
         // Transient narration, not a durable log entry — published over SSE only, never
         // written to chat_messages (unlike tool_step's system notes or the final turn_complete).
         onEvent({ type: "assistant_note", text: evt.text });
+      } else if (evt.kind === "ask_question") {
+        // Persisted as a normal assistant-role message (tagged JSON, see questionMessage.ts) so
+        // reloading the session still shows the question — it's just another chat message.
+        addChatMessage(
+          db,
+          sessionId,
+          "assistant",
+          encodeQuestion({ question: evt.question, choices: evt.choices, allowMultiple: evt.allowMultiple }),
+        );
+        onEvent({
+          type: "ask_question",
+          question: evt.question,
+          choices: evt.choices,
+          allowMultiple: evt.allowMultiple,
+        });
       } else if (evt.kind === "turn_result") {
         finish(
           evt.success

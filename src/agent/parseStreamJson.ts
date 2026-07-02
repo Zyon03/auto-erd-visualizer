@@ -1,9 +1,11 @@
 export type ParsedEvent =
   | { kind: 'tool_step'; toolName: string; stepText: string }
   | { kind: 'assistant_text'; text: string }
+  | { kind: 'ask_question'; question: string; choices: string[]; allowMultiple: boolean }
   | { kind: 'turn_result'; success: boolean; text: string }
 
 const MCP_TOOL_PREFIX = 'mcp__erd__'
+const ASK_QUESTION_TOOL = 'ask_question'
 
 interface JsonRecord {
   [key: string]: unknown
@@ -30,7 +32,21 @@ export function createStreamJsonParser() {
         for (const block of content as JsonRecord[]) {
           if (block.type === 'tool_use' && typeof block.name === 'string' && typeof block.id === 'string') {
             if (block.name.startsWith(MCP_TOOL_PREFIX)) {
-              pendingToolNames.set(block.id, block.name.slice(MCP_TOOL_PREFIX.length))
+              const toolName = block.name.slice(MCP_TOOL_PREFIX.length)
+              if (toolName === ASK_QUESTION_TOOL) {
+                // Everything the frontend needs is already in this call's own input — no need
+                // to wait for the (trivial) tool_result round-trip, so this never goes into
+                // pendingToolNames and its later tool_result is harmlessly ignored below.
+                const input = block.input as JsonRecord | undefined
+                const question = typeof input?.question === 'string' ? input.question : ''
+                const choices = Array.isArray(input?.choices)
+                  ? (input!.choices as unknown[]).filter((c): c is string => typeof c === 'string')
+                  : []
+                const allowMultiple = input?.allowMultiple === true
+                if (question) events.push({ kind: 'ask_question', question, choices, allowMultiple })
+              } else {
+                pendingToolNames.set(block.id, toolName)
+              }
             }
           } else if (block.type === 'text' && typeof block.text === 'string') {
             events.push({ kind: 'assistant_text', text: block.text })

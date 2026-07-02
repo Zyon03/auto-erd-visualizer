@@ -135,5 +135,23 @@ server.registerTool(
   async (input) => textResult(tools.delete_relationship(input).summary),
 )
 
+server.registerTool(
+  'ask_question',
+  {
+    title: 'Ask a clarifying question',
+    description:
+      'Pause and ask the user a clarifying question about an ambiguous business requirement, optionally with ' +
+      'choices to pick from. Use during early/mid spec phases when a decision meaningfully shapes the schema and ' +
+      "isn't obvious from context. After calling this, stop — do not call further tools this turn; wait for the " +
+      "user's reply on the next turn.",
+    inputSchema: {
+      question: z.string().min(1),
+      choices: z.array(z.string().min(1)).optional(),
+      allowMultiple: z.boolean().optional(),
+    },
+  },
+  async (input) => textResult(tools.ask_question(input).summary),
+)
+
 const transport = new StdioServerTransport()
 await server.connect(transport)

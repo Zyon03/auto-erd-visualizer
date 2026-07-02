@@ -7,11 +7,13 @@ import { ChatMessageBubble } from './ChatMessageBubble'
 import { Button } from '../ui/button'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../ui/select'
 import { MODEL_OPTIONS } from '../../agent/models'
+import { encodeQuestion } from '../../agent/questionMessage'
 import type { ChatMessage } from '../../mutations/chatMessages'
 
 type TurnEvent =
   | { type: 'tool_step'; toolName: string; stepText: string }
   | { type: 'assistant_note'; text: string }
+  | { type: 'ask_question'; question: string; choices: string[]; allowMultiple: boolean }
   | { type: 'turn_complete'; text: string }
   | { type: 'turn_error'; message: string }
 
@@ -53,6 +55,24 @@ export function ChatPanel({ sessionId, initialMessages, onSchemaMayHaveChanged, 
       onSchemaMayHaveChanged()
     } else if (event.type === 'assistant_note') {
       setWorkingNote(event.text)
+    } else if (event.type === 'ask_question') {
+      // Deliberately does NOT clear turnInFlight — the AI is prompted to stop after asking, but
+      // the `claude` process is still technically running until turn_complete/turn_error
+      // arrives. Answering immediately (before that) would spawn a second concurrent turn for
+      // the same session (registerRunningTurn keys on sessionId, so the first would become
+      // uncancellable and the two processes' SSE output would interleave). The question renders
+      // right away either way; only the reply controls stay briefly disabled.
+      setWorkingNote(null)
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: nextLocalId.current--,
+          sessionId,
+          role: 'assistant',
+          content: encodeQuestion({ question: event.question, choices: event.choices, allowMultiple: event.allowMultiple }),
+          createdAt: '',
+        },
+      ])
     } else if (event.type === 'turn_complete') {
       setWorkingNote(null)
       if (event.text) {
@@ -73,14 +93,18 @@ export function ChatPanel({ sessionId, initialMessages, onSchemaMayHaveChanged, 
     }
   })
 
-  async function handleSend() {
-    const content = draft.trim()
+  async function handleSend(overrideText?: string) {
+    const content = (overrideText ?? draft).trim()
     if (!content || turnInFlight) return
     setDraft('')
     setTurnInFlight(true)
     setWorkingNote(null)
     const message = await sendMessage({ data: { sessionId, content } })
     setMessages((prev) => [...prev, message])
+  }
+
+  function handleAnswerQuestion(text: string) {
+    handleSend(text)
   }
 
   function handleStop() {
@@ -156,7 +180,7 @@ export function ChatPanel({ sessionId, initialMessages, onSchemaMayHaveChanged, 
               placeholder="e.g. Users can place orders, each order has multiple items..."
               className="flex-1 rounded-lg border border-line bg-surface/90 px-3 py-2 text-sm text-ink placeholder:text-ink-faint outline-none focus-visible:border-accent"
             />
-            <Button onClick={handleSend} disabled={turnInFlight}>
+            <Button onClick={() => handleSend()} disabled={turnInFlight}>
               <Send size={14} />
               Send
             </Button>
@@ -190,8 +214,14 @@ export function ChatPanel({ sessionId, initialMessages, onSchemaMayHaveChanged, 
         </div>
         {chatMode === 'full' && (
           <div className="max-h-64 space-y-2 overflow-y-auto px-3 pt-3 [mask-image:linear-gradient(to_bottom,transparent,black_16px)]">
-            {messages.map((message) => (
-              <ChatMessageBubble key={message.id} message={message} />
+            {messages.map((message, index) => (
+              <ChatMessageBubble
+                key={message.id}
+                message={message}
+                interactive={index === messages.length - 1}
+                disabled={turnInFlight}
+                onAnswerQuestion={handleAnswerQuestion}
+              />
             ))}
           </div>
         )}
@@ -220,7 +250,7 @@ export function ChatPanel({ sessionId, initialMessages, onSchemaMayHaveChanged, 
               Stop
             </Button>
           ) : (
-            <Button onClick={handleSend}>
+            <Button onClick={() => handleSend()}>
               <Send size={14} />
               Send
             </Button>

@@ -34,6 +34,63 @@ describe('createStreamJsonParser', () => {
     ])
   })
 
+  it('emits ask_question immediately from the tool_use input, without waiting for a tool_result', () => {
+    const parser = createStreamJsonParser()
+    const toolUseLine = JSON.stringify({
+      type: 'assistant',
+      message: {
+        content: [
+          {
+            type: 'tool_use',
+            id: 'toolu_3',
+            name: 'mcp__erd__ask_question',
+            input: { question: 'Should refunds be partial or all-or-nothing?', choices: ['Partial', 'All-or-nothing'], allowMultiple: false },
+          },
+        ],
+      },
+    })
+
+    expect(parser.parseLine(toolUseLine)).toEqual([
+      {
+        kind: 'ask_question',
+        question: 'Should refunds be partial or all-or-nothing?',
+        choices: ['Partial', 'All-or-nothing'],
+        allowMultiple: false,
+      },
+    ])
+  })
+
+  it('ignores a stray tool_result for an ask_question call (never registered as pending)', () => {
+    const parser = createStreamJsonParser()
+    const toolUseLine = JSON.stringify({
+      type: 'assistant',
+      message: {
+        content: [{ type: 'tool_use', id: 'toolu_4', name: 'mcp__erd__ask_question', input: { question: 'Soft delete users?' } }],
+      },
+    })
+    const toolResultLine = JSON.stringify({
+      type: 'user',
+      message: {
+        content: [{ type: 'tool_result', tool_use_id: 'toolu_4', content: [{ type: 'text', text: 'Question presented to the user.' }] }],
+      },
+    })
+
+    parser.parseLine(toolUseLine)
+    expect(parser.parseLine(toolResultLine)).toEqual([])
+  })
+
+  it('defaults choices to an empty array and allowMultiple to false when omitted', () => {
+    const parser = createStreamJsonParser()
+    const line = JSON.stringify({
+      type: 'assistant',
+      message: { content: [{ type: 'tool_use', id: 'toolu_5', name: 'mcp__erd__ask_question', input: { question: 'What should happen on account deletion?' } }] },
+    })
+
+    expect(parser.parseLine(line)).toEqual([
+      { kind: 'ask_question', question: 'What should happen on account deletion?', choices: [], allowMultiple: false },
+    ])
+  })
+
   it('emits assistant_text for a plain text message', () => {
     const parser = createStreamJsonParser()
     const line = JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'Done.' }] } })
