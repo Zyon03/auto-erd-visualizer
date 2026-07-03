@@ -230,11 +230,12 @@ function SessionContent({
     async (tableId: number, positionX: number, positionY: number) => {
       try {
         await updateTablePosition({ data: { tableId, positionX, positionY } })
+        await refetch()
       } catch {
         toast.error('Could not save table position')
       }
     },
-    [updateTablePosition],
+    [updateTablePosition, refetch],
   )
 
   async function handleAutoLayout() {

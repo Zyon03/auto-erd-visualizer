@@ -8,6 +8,9 @@ import spawn from "cross-spawn";
 import { randomUUID } from "node:crypto";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import readline from "node:readline";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import * as schema from "../db/schema";
 import {
@@ -133,6 +136,14 @@ const SYSTEM_PROMPT =
   "anything that isn't a schema change or a clarifying question, per <answering_questions> above.\n" +
   "</scope>";
 
+// Written to disk once and passed via --system-prompt-file instead of inline via --system-prompt:
+// on Windows `claude` is invoked through cmd.exe (see the cross-spawn comment above), which has an
+// 8191-character command-line ceiling -- and cross-spawn's escaping (a `^` before every space,
+// comma, paren, etc. to survive cmd.exe parsing) roughly doubles this prompt's length, so it can
+// blow that ceiling well before SYSTEM_PROMPT itself looks unreasonably long.
+const SYSTEM_PROMPT_PATH = join(tmpdir(), "auto-erd-system-prompt.txt");
+writeFileSync(SYSTEM_PROMPT_PATH, SYSTEM_PROMPT);
+
 const BASE_ALLOWED_TOOLS = [
   "mcp__erd__get_schema",
   "mcp__erd__add_table",
@@ -203,8 +214,8 @@ export function runTurn(
     "--setting-sources",
     "",
     "--disable-slash-commands",
-    "--system-prompt",
-    SYSTEM_PROMPT,
+    "--system-prompt-file",
+    SYSTEM_PROMPT_PATH,
   ];
 
   if (session.model) {
@@ -232,6 +243,12 @@ export function runTurn(
       stderrBuffer = (stderrBuffer + chunk.toString()).slice(0, MAX_STDERR_LEN);
     }
   });
+
+  // Raw copy of every stdout line (stream-json events), kept only so the console.log below can
+  // show what the CLI actually returned -- classifyFailureText/the UI never see this, they work
+  // off stderrBuffer and the parsed events instead.
+  let stdoutBuffer = "";
+  const MAX_STDOUT_LEN = 20000;
 
   registerRunningTurn(sessionId, {
     cancel: () => {
@@ -275,6 +292,10 @@ export function runTurn(
     clearTimeout(watchdog);
     clearRunningTurn(sessionId);
 
+    console.log(`[user prompt] ${resolvedMessage}`);
+    console.log(`claude output:\n${stdoutBuffer || "(no stdout)"}`);
+    if (stderrBuffer) console.log(`claude stderr:\n${stderrBuffer}`);
+
     if (checkSessionGone()) return;
 
     if (event.type === "turn_error" && !streamedAnything && !cancelledByUser) {
@@ -308,6 +329,9 @@ export function runTurn(
   rl.on("line", (line) => {
     resetWatchdog();
     streamedAnything = true;
+    if (stdoutBuffer.length < MAX_STDOUT_LEN) {
+      stdoutBuffer = (stdoutBuffer + line + "\n").slice(0, MAX_STDOUT_LEN);
+    }
     if (checkSessionGone()) return;
 
     for (const evt of parser.parseLine(line)) {
@@ -375,6 +399,7 @@ export function runTurn(
 
   child.on("close", (code) => {
     if (settled) return;
+    console.log(`claude exited with code ${code}`);
     if (cancelledByUser) {
       finish({ type: "turn_error", kind: "other", message: "Stopped." });
       return;

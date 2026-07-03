@@ -19,18 +19,13 @@ export function PendingQuestionDrawer({
   onAnswer: (text: string) => void
 }) {
   const [selected, setSelected] = useState<string[]>([])
-  const [showOther, setShowOther] = useState(false)
-  const [otherText, setOtherText] = useState('')
 
-  // Local choice/other state must not leak from one question to the next -- keyed by
-  // messageId so React resets it for us on every new question instead of carrying over a
-  // stale selection.
+  // Local choice state must not leak from one question to the next -- keyed by messageId so
+  // React resets it for us on every new question instead of carrying over a stale selection.
   const [trackedMessageId, setTrackedMessageId] = useState(pendingQuestion?.messageId)
   if (pendingQuestion && pendingQuestion.messageId !== trackedMessageId) {
     setTrackedMessageId(pendingQuestion.messageId)
     setSelected([])
-    setShowOther(false)
-    setOtherText('')
   }
 
   if (!pendingQuestion) return null
@@ -44,12 +39,7 @@ export function PendingQuestionDrawer({
     }
   }
 
-  function submitOther() {
-    if (!otherText.trim()) return
-    onAnswer(otherText.trim())
-  }
-
-  const showOtherInput = showOther || choices.length === 0
+  const disabledTitle = disabled ? 'Wait for the AI to finish' : undefined
 
   return (
     <div className="animate-[fade-in-up_200ms_ease-out] px-3 pt-3">
@@ -67,6 +57,7 @@ export function PendingQuestionDrawer({
                 <button
                   key={choice}
                   disabled={disabled}
+                  title={disabledTitle}
                   onClick={() => toggleChoice(choice)}
                   className={cn(
                     'rounded-full border px-2.5 py-1 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-50',
@@ -79,41 +70,15 @@ export function PendingQuestionDrawer({
                 </button>
               )
             })}
-            {!showOther && (
-              <button
-                disabled={disabled}
-                onClick={() => setShowOther(true)}
-                className="rounded-full border border-dashed border-line px-2.5 py-1 text-xs text-ink-faint hover:border-line-strong hover:text-ink-muted disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                Other…
-              </button>
-            )}
           </div>
         )}
         {allowMultiple && choices.length > 0 && (
-          <Button size="sm" className="mt-2" disabled={disabled || selected.length === 0} onClick={() => onAnswer(selected.join(', '))}>
+          <Button size="sm" className="mt-2" disabled={disabled || selected.length === 0} title={disabledTitle} onClick={() => onAnswer(selected.join(', '))}>
             Send
           </Button>
         )}
-        {showOtherInput && (
-          <div className="mt-2 flex gap-1.5">
-            <input
-              autoFocus={showOther}
-              value={otherText}
-              onChange={(e) => setOtherText(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && submitOther()}
-              disabled={disabled}
-              placeholder="Type your answer..."
-              className="flex-1 rounded border border-line bg-inset px-2 py-1 text-xs text-ink outline-none focus-visible:border-accent disabled:opacity-50"
-            />
-            <button
-              disabled={disabled || !otherText.trim()}
-              onClick={submitOther}
-              className="rounded border border-line px-2 py-1 text-xs text-ink-muted hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Send
-            </button>
-          </div>
+        {choices.length === 0 && (
+          <p className="text-xs text-ink-faint">Type your answer in the chat input below.</p>
         )}
       </div>
     </div>
