@@ -160,5 +160,19 @@ server.registerTool(
   async (input) => textResult(tools.ask_question(input).summary),
 )
 
+server.registerTool(
+  'rename_session',
+  {
+    title: 'Rename session',
+    description:
+      "Rename this session to a short name (2-4 words) that captures the system being modeled — just the system " +
+      'name itself, e.g. "Library System" or "E-commerce Store", no "Session" prefix and no filler like "ERD for...". ' +
+      "Only ever offered on a session's first turn, and only takes effect if the session still has its default " +
+      'auto-generated name — has no effect otherwise, so it is always safe to call.',
+    inputSchema: { name: z.string().min(1) },
+  },
+  async (input) => textResult(tools.rename_session(input).summary),
+)
+
 const transport = new StdioServerTransport()
 await server.connect(transport)

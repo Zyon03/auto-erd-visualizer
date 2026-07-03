@@ -15,10 +15,12 @@ import { toast } from 'sonner'
 import { sendMessageFn, cancelTurnFn, loadEarlierChatMessagesFn } from '../../server-fns/chat'
 import { useSessionEvents } from '../../hooks/useSessionEvents'
 import { ChatMessageBubble } from './ChatMessageBubble'
+import { PendingQuestionDrawer } from './PendingQuestionDrawer'
+import { DotPulse } from '../DotPulse'
 import { Button } from '../ui/button'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../ui/select'
 import { MODEL_OPTIONS } from '../../agent/models'
-import { encodeQuestion } from '../../agent/questionMessage'
+import { encodeQuestion, findPendingQuestion } from '../../agent/questionMessage'
 import { encodeAgentError, decodeAgentError } from '../../agent/agentErrorMessage'
 import type { AgentErrorKind } from '../../agent/classifyAgentError'
 import type { ChatMessage } from '../../mutations/chatMessages'
@@ -29,6 +31,7 @@ type TurnEvent =
   | { type: 'tool_step'; toolName: string; stepText: string }
   | { type: 'assistant_note'; text: string }
   | { type: 'ask_question'; question: string; choices: string[]; allowMultiple: boolean }
+  | { type: 'session_renamed'; name: string }
   | { type: 'turn_complete'; text: string }
   | { type: 'turn_error'; kind: AgentErrorKind; message: string; hint?: string }
 
@@ -66,6 +69,10 @@ export interface ChatPanelProps {
    *  older ones unloaded — see docs/superpowers/plans/2026-07-03-chat-message-pagination.md. */
   initialHasMoreOlderMessages: boolean
   onSchemaMayHaveChanged: () => void
+  /** Fired when the AI names a brand-new session for itself (see the "Session naming" paragraph
+   *  in runTurn.ts's SYSTEM_PROMPT) — the caller owns the displayed name (sidebar + topbar), this
+   *  component only ever reports it changed. */
+  onSessionRenamed?: (name: string) => void
   model: string | null
   onModelChange: (model: string) => void
   /** A table can exist with zero chat messages (added directly on the canvas, no AI turn ever
@@ -79,6 +86,7 @@ export function ChatPanel({
   initialMessages,
   initialHasMoreOlderMessages,
   onSchemaMayHaveChanged,
+  onSessionRenamed,
   model,
   onModelChange,
   hasTables,
@@ -129,6 +137,21 @@ export function ChatPanel({
     [messages, showActivityLog],
   )
 
+  // Derived, not tracked as its own state -- see findPendingQuestion's doc comment. This is what
+  // makes the question un-buryable: it doesn't matter whether the AI adds closing prose after
+  // asking, or where the question sits in `messages`, only whether the user has replied yet.
+  const pendingQuestion = useMemo(() => findPendingQuestion(messages), [messages])
+
+  // Ticks once a second for the whole turn (not per working-note change) so "Thinking… 4s" becomes
+  // "Adding a table… 11s" as the turn progresses -- a running total, not a per-step timer.
+  const [elapsedSeconds, setElapsedSeconds] = useState(0)
+  useEffect(() => {
+    if (!turnInFlight) return
+    setElapsedSeconds(0)
+    const interval = setInterval(() => setElapsedSeconds((s) => s + 1), 1000)
+    return () => clearInterval(interval)
+  }, [turnInFlight])
+
   // Message history opens on the most recent message, not the oldest — the scrollable region is
   // remounted whenever chatMode toggles away from 'full' and back (see the conditional render
   // below), which resets scrollTop to 0 each time, so this has to re-run on chatMode too, not
@@ -175,13 +198,17 @@ export function ChatPanel({
       onSchemaMayHaveChanged()
     } else if (event.type === 'assistant_note') {
       setWorkingNote(event.text)
+    } else if (event.type === 'session_renamed') {
+      onSessionRenamed?.(event.name)
     } else if (event.type === 'ask_question') {
       // Deliberately does NOT clear turnInFlight — the AI is prompted to stop after asking, but
       // the `claude` process is still technically running until turn_complete/turn_error
       // arrives. Answering immediately (before that) would spawn a second concurrent turn for
       // the same session (registerRunningTurn keys on sessionId, so the first would become
       // uncancellable and the two processes' SSE output would interleave). The question renders
-      // right away either way; only the reply controls stay briefly disabled.
+      // right away either way; only the drawer's reply controls stay briefly disabled — and only
+      // briefly, since pendingQuestion (see above) no longer depends on this being the last
+      // message once turn_complete arrives.
       setWorkingNote(null)
       setMessages((prev) => [
         ...prev,
@@ -205,10 +232,10 @@ export function ChatPanel({
       onSchemaMayHaveChanged()
     } else if (event.type === 'turn_error') {
       setWorkingNote(null)
-      const content =
-        (event.kind === 'not_installed' || event.kind === 'not_authenticated') && event.hint
-          ? encodeAgentError({ kind: event.kind, message: event.message, hint: event.hint })
-          : event.message
+      // Always tagged (not just the two actionable kinds) so a generic failure -- a timeout, a
+      // non-zero exit code -- can't silently disappear behind the activity-log toggle the way a
+      // plain-text system message would. See agentErrorMessage.ts.
+      const content = encodeAgentError({ kind: event.kind, message: event.message, hint: event.hint })
       setMessages((prev) => [
         ...prev,
         { id: nextLocalId.current--, sessionId, role: 'system', content, createdAt: '' },
@@ -390,26 +417,26 @@ export function ChatPanel({
                 </button>
               </div>
             )}
-            {visibleMessages.map((message, index) => (
+            {visibleMessages.map((message) => (
               // The animation only plays once, on this element's first mount — existing messages
               // keep their stable `message.id` key across re-renders (e.g. a new message arriving
               // appends to the array rather than remounting the list), so only a genuinely new
               // message ever animates in.
               <div key={message.id} className="animate-[fade-in-up_200ms_ease-out]">
-                <ChatMessageBubble
-                  message={message}
-                  interactive={index === visibleMessages.length - 1}
-                  disabled={turnInFlight}
-                  onAnswerQuestion={handleAnswerQuestion}
-                />
+                <ChatMessageBubble message={message} />
               </div>
             ))}
           </div>
         )}
-        {workingNote && (
+        {/* Rendered outside isHistoryVisible on purpose — collapsing the message history must
+            never hide the one thing blocking the AI from continuing. */}
+        <PendingQuestionDrawer pendingQuestion={pendingQuestion} disabled={turnInFlight} onAnswer={handleAnswerQuestion} />
+        {turnInFlight && (
           <div className="flex items-center gap-1.5 px-4 pt-2 text-xs italic text-ink-faint">
-            <span className="h-1 w-1 shrink-0 animate-pulse rounded-full bg-accent" aria-hidden />
-            <span className="truncate">{workingNote}</span>
+            <DotPulse size={4} />
+            <span className="truncate">
+              {workingNote ?? 'Thinking…'} {elapsedSeconds}s
+            </span>
           </div>
         )}
         <div className="flex items-center gap-2 p-3">
@@ -422,7 +449,7 @@ export function ChatPanel({
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSend()}
             disabled={turnInFlight}
-            placeholder={turnInFlight ? 'Thinking...' : 'Message the AI...'}
+            placeholder={pendingQuestion ? 'Type your answer…' : turnInFlight ? 'Thinking…' : 'Message the AI...'}
             className="flex-1 rounded-lg border border-line bg-inset/80 px-3 py-2 text-sm text-ink placeholder:text-ink-faint outline-none focus-visible:border-accent disabled:opacity-50"
           />
           {turnInFlight ? (

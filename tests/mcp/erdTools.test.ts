@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { createDb } from '../../src/db/client'
-import { createSession } from '../../src/mutations/sessions'
+import { createSession, getSession } from '../../src/mutations/sessions'
 import { createErdTools } from '../../src/mcp/erdTools'
 
 describe('createErdTools', () => {
@@ -77,5 +77,44 @@ describe('createErdTools', () => {
 
     expect(result.summary).toBe('Relationship #999999 was already gone')
     expect(result.data).toBeUndefined()
+  })
+
+  describe('rename_session', () => {
+    it('renames a session that still has its default auto-generated name', () => {
+      const defaultId = createSession(db, 'Session 1').id
+      const tools = createErdTools(db, defaultId)
+
+      const result = tools.rename_session({ name: 'Library System' })
+
+      expect(result.summary).toBe('Renamed session to `Library System`')
+      expect(getSession(db, defaultId)?.name).toBe('Library System')
+    })
+
+    it('trims whitespace from the given name', () => {
+      const defaultId = createSession(db, 'Session 2').id
+      const tools = createErdTools(db, defaultId)
+
+      tools.rename_session({ name: '  E-commerce Store  ' })
+
+      expect(getSession(db, defaultId)?.name).toBe('E-commerce Store')
+    })
+
+    it('refuses to overwrite a name that is not the default pattern', () => {
+      const customId = createSession(db, 'My Custom System').id
+      const tools = createErdTools(db, customId)
+
+      const result = tools.rename_session({ name: 'Library System' })
+
+      expect(result.summary).toBe('Session already has a name (`My Custom System`) — leaving it as is.')
+      expect(getSession(db, customId)?.name).toBe('My Custom System')
+    })
+
+    it('does not throw for a nonexistent sessionId', () => {
+      const tools = createErdTools(db, 999999)
+
+      const result = tools.rename_session({ name: 'Library System' })
+
+      expect(result.summary).toBe('Session #999999 was already gone')
+    })
   })
 })

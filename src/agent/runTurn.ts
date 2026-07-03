@@ -1,5 +1,12 @@
-import { spawn } from "node:child_process";
+// node:child_process's own `spawn` can't find npm-installed global CLIs on Windows: `claude`
+// resolves to a `claude.cmd` shim there, and `.cmd`/`.bat` files aren't directly executable via
+// CreateProcess, only through cmd.exe -- which plain `spawn` doesn't route through, producing an
+// ENOENT even though `claude` works fine when typed into a terminal. cross-spawn (the same fix
+// npm/husky/etc. use) detects this and routes through cmd.exe itself, escaping each argument
+// individually so this stays safe even though `args` includes the user's own chat message text.
+import spawn from "cross-spawn";
 import { randomUUID } from "node:crypto";
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import readline from "node:readline";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import * as schema from "../db/schema";
@@ -30,6 +37,12 @@ const SYSTEM_PROMPT =
   "use the provided erd tools to incrementally build an entity-relationship diagram that matches what they describe. " +
   "Call get_schema first if you need to see the current state. Give relationships a short, direct, plain-language aiComment " +
   "describing what the relationship means.\n\n" +
+  "Answering questions: not every message requires a schema change. When the user asks something about the " +
+  "system you're building together — is this table really master data, would you normalize this, what's a good " +
+  "index here, why did you model it this way — just answer directly in plain text. Call get_schema first if you " +
+  "need to check current state, but a plain-text reply never requires any other tool call, and an ordinary " +
+  "question is not a reason to end your turn without one. Only reach for ask_question when you need the user's " +
+  "input to decide what to build next.\n\n" +
   "Field types: include a sensible length for varchar fields instead of leaving it unspecified, e.g. " +
   "varchar(255) for emails/URLs/general free text, varchar(100) for names or titles, varchar(50) for " +
   "codes/slugs/phone numbers, varchar(20) for short identifiers — adjust based on what the field actually " +
@@ -65,9 +78,18 @@ const SYSTEM_PROMPT =
   "ask about things you can reasonably infer from context — every question has a cost, so only spend it on " +
   "decisions that actually change what gets built. After calling ask_question, stop: do not call any more " +
   "tools this turn, and let your turn end so the user can reply.\n\n" +
-  "You have no capabilities beyond the provided erd tools in this session.";
+  "Session naming: if rename_session is available to you, this is a brand-new session and the user's first " +
+  "message is the only chance to name it — call it once you understand what system they're describing, with " +
+  "a short name (2-4 words) that's just the system itself, e.g. \"Library System\", \"E-commerce Store\", " +
+  "\"Task Tracker\" — no \"Session\" prefix, no \"ERD for...\"/\"Database for...\" filler, no punctuation. Even " +
+  "a vague first message deserves a best-guess name rather than skipping this — there's no later turn to " +
+  "catch up on it. Call it early in the turn, alongside your first schema-building tool calls, not saved for " +
+  "the end.\n\n" +
+  "The erd tools are your only way to take action (no running code, no browsing, no other capabilities) — but " +
+  "that's about *acting*, not *replying*: plain text is always available to you and is the right response to " +
+  "anything that isn't a schema change or a clarifying question, per \"Answering questions\" above.";
 
-const ALLOWED_TOOLS = [
+const BASE_ALLOWED_TOOLS = [
   "mcp__erd__get_schema",
   "mcp__erd__add_table",
   "mcp__erd__rename_table",
@@ -80,13 +102,14 @@ const ALLOWED_TOOLS = [
   "mcp__erd__update_relationship",
   "mcp__erd__delete_relationship",
   "mcp__erd__ask_question",
-].join(",");
+];
 
 export type TurnEvent =
   | { type: "tool_call_started"; toolName: string }
   | { type: "tool_step"; toolName: string; stepText: string }
   | { type: "assistant_note"; text: string }
   | { type: "ask_question"; question: string; choices: string[]; allowMultiple: boolean }
+  | { type: "session_renamed"; name: string }
   | { type: "turn_complete"; text: string }
   | { type: "turn_error"; kind: AgentErrorKind; message: string; hint?: string };
 
@@ -115,6 +138,11 @@ export function runTurn(
 
   const mcpConfig = buildMcpConfig(sessionId, databasePath);
 
+  // rename_session is only ever offered on a session's first turn — see the "Session naming"
+  // paragraph in SYSTEM_PROMPT above. erdTools.ts's own default-name guard is a second layer,
+  // for the edge case of a session renamed manually before its first message.
+  const allowedTools = isFirstTurn ? [...BASE_ALLOWED_TOOLS, "mcp__erd__rename_session"] : BASE_ALLOWED_TOOLS;
+
   const args = [
     "-p",
     resolvedMessage,
@@ -127,7 +155,7 @@ export function runTurn(
     mcpConfig,
     "--strict-mcp-config",
     "--allowedTools",
-    ALLOWED_TOOLS,
+    allowedTools.join(","),
     "--setting-sources",
     "",
     "--disable-slash-commands",
@@ -139,7 +167,10 @@ export function runTurn(
     args.push("--model", session.model);
   }
 
-  const child = spawn("claude", args, { cwd: process.cwd() });
+  // cross-spawn's types don't narrow on the (stdio-less) options overload the way node:child_process's
+  // own do, but the child is still created with the same default 'pipe' stdio -- stdout/stderr are
+  // never null in practice.
+  const child = spawn("claude", args, { cwd: process.cwd() }) as ChildProcessWithoutNullStreams;
   const parser = createStreamJsonParser();
   const rl = readline.createInterface({ input: child.stdout });
 
@@ -209,11 +240,10 @@ export function runTurn(
     if (event.type === "turn_complete" && event.text) {
       addChatMessage(db, sessionId, "assistant", event.text);
     } else if (event.type === "turn_error") {
-      const content =
-        (event.kind === "not_installed" || event.kind === "not_authenticated") && event.hint
-          ? encodeAgentError({ kind: event.kind, message: event.message, hint: event.hint })
-          : event.message;
-      addChatMessage(db, sessionId, "system", content);
+      // Always tagged, not just the two actionable kinds -- see agentErrorMessage.ts's doc
+      // comment for why a plain-text "other" error used to silently vanish behind the chat
+      // panel's activity-log toggle.
+      addChatMessage(db, sessionId, "system", encodeAgentError({ kind: event.kind, message: event.message, hint: event.hint }));
     }
 
     onEvent(event);
@@ -236,6 +266,13 @@ export function runTurn(
           toolName: evt.toolName,
           stepText: evt.stepText,
         });
+        if (evt.toolName === "rename_session") {
+          // Re-read rather than parsing evt.stepText -- the MCP server (a separate process) may
+          // have declined the rename (default-name guard), so the DB row is the source of truth
+          // for what the name actually is now, not the tool's summary text.
+          const renamedSession = getSession(db, sessionId);
+          if (renamedSession) onEvent({ type: "session_renamed", name: renamedSession.name });
+        }
       } else if (evt.kind === "assistant_text") {
         // Transient narration, not a durable log entry — published over SSE only, never
         // written to chat_messages (unlike tool_step's system notes or the final turn_complete).

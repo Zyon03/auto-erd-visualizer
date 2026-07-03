@@ -12,6 +12,15 @@ describe('agentErrorMessage', () => {
     expect(decodeAgentError(encodeAgentError(payload))).toEqual(payload)
   })
 
+  it('round-trips an "other" payload with no hint -- the generic/unclassified failure case', () => {
+    // This used to be rejected on decode (kind was restricted to the two actionable ones), which
+    // meant a generic failure -- a timeout, a non-zero exit code -- fell back to an undecodable
+    // plain string and silently disappeared behind the chat panel's activity-log toggle instead
+    // of showing as an error. Every kind must round-trip now so every failure stays visible.
+    const payload = { kind: 'other' as const, message: 'The AI process exited unexpectedly (code 1).' }
+    expect(decodeAgentError(encodeAgentError(payload))).toEqual(payload)
+  })
+
   it('returns null for ordinary prose', () => {
     expect(decodeAgentError('The AI process exited unexpectedly (code 1).')).toBeNull()
   })
@@ -22,7 +31,7 @@ describe('agentErrorMessage', () => {
 
   it('returns null for well-formed JSON with an invalid kind', () => {
     expect(
-      decodeAgentError('__erd_agent_error__:' + JSON.stringify({ kind: 'other', message: 'x', hint: 'y' })),
+      decodeAgentError('__erd_agent_error__:' + JSON.stringify({ kind: 'bogus', message: 'x', hint: 'y' })),
     ).toBeNull()
   })
 

@@ -4,9 +4,17 @@ import { addTable, renameTable, deleteTable } from '../mutations/tables'
 import { addField, renameField, updateField, deleteField } from '../mutations/fields'
 import { addRelationship, updateRelationship, deleteRelationship, type Cardinality } from '../mutations/relationships'
 import { getFullSchema } from '../mutations/getFullSchema'
+import { getSession, renameSession } from '../mutations/sessions'
 import type { TableRole } from '../mutations/tableRole'
 
 type Db = BetterSQLite3Database<typeof schema>
+
+// Both real creation call sites (routes/index.tsx, SessionSidebar.tsx) name a fresh session
+// "Session <n>" — used as a cheap "has a human already named this?" check so rename_session
+// (itself only offered to the model on a session's first turn, see runTurn.ts) never overwrites
+// a name someone set on purpose, including the edge case of renaming before ever sending a
+// first chat message.
+const DEFAULT_SESSION_NAME_PATTERN = /^Session \d+$/
 
 export interface ErdToolResult {
   summary: string
@@ -103,6 +111,16 @@ export function createErdTools(db: Db, sessionId: number) {
         summary: 'Question presented to the user. Wait for their reply before continuing — do not call more tools this turn.',
         data: input,
       }
+    },
+
+    rename_session: (input: { name: string }): ErdToolResult => {
+      const session = getSession(db, sessionId)
+      if (!session) return { summary: `Session #${sessionId} was already gone` }
+      if (!DEFAULT_SESSION_NAME_PATTERN.test(session.name)) {
+        return { summary: `Session already has a name (\`${session.name}\`) — leaving it as is.` }
+      }
+      const renamed = renameSession(db, sessionId, input.name.trim())
+      return { summary: `Renamed session to \`${renamed.name}\``, data: renamed }
     },
   }
 }

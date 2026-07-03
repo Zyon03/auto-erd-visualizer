@@ -336,6 +336,11 @@ function SessionContent({
             initialMessages={initialMessages}
             initialHasMoreOlderMessages={initialHasMoreOlderMessages}
             onSchemaMayHaveChanged={refetch}
+            // Just local state — the tool_step event that accompanies every rename_session call
+            // already triggers refetch() above, which calls notifySessionsChanged() itself, so
+            // the sidebar picks up the new name on its own; this only needs to update the topbar
+            // in this already-open tab.
+            onSessionRenamed={setName}
             model={model}
             onModelChange={handleModelChange}
             hasTables={schema.tables.length > 0}
