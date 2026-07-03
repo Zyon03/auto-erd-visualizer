@@ -2,10 +2,11 @@ import { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
-import { HelpCircle } from 'lucide-react'
+import { HelpCircle, TriangleAlert } from 'lucide-react'
 import type { AnchorHTMLAttributes, HTMLAttributes, ReactNode } from 'react'
 import type { ChatMessage } from '../../mutations/chatMessages'
 import { decodeQuestion } from '../../agent/questionMessage'
+import { decodeAgentError } from '../../agent/agentErrorMessage'
 import { Button } from '../ui/button'
 import { cn } from '../../lib/cn'
 
@@ -154,6 +155,20 @@ export function ChatMessageBubble({
   }
 
   if (message.role === 'system') {
+    const agentError = decodeAgentError(message.content)
+    if (agentError) {
+      return (
+        <div className="mr-auto max-w-[90%] rounded-lg border border-amber/30 bg-amber/10 px-3 py-2.5 text-sm text-ink">
+          <div className="flex items-start gap-1.5 font-medium">
+            <TriangleAlert size={14} className="mt-0.5 shrink-0 text-amber" />
+            <span>{agentError.message}</span>
+          </div>
+          <div className="mt-1 pl-[20px] text-xs text-ink-muted">
+            <ReactMarkdown components={systemMarkdownComponents}>{agentError.hint}</ReactMarkdown>
+          </div>
+        </div>
+      )
+    }
     return (
       <div className="px-1 font-mono text-xs text-ink-faint">
         <ReactMarkdown components={systemMarkdownComponents}>{message.content}</ReactMarkdown>

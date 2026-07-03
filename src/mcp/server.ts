@@ -32,7 +32,14 @@ server.registerTool(
 
 server.registerTool(
   'add_table',
-  { title: 'Add table', description: 'Add a new table to the ERD.', inputSchema: { name: z.string().min(1) } },
+  {
+    title: 'Add table',
+    description:
+      'Add a new table to the ERD. Set `role` to `master` or `transactional` based on what the table represents ' +
+      "— a foreign key alone doesn't make a table transactional (e.g. an Employee table referencing Department " +
+      "is still master data). Omitting it falls back to guessing from foreign keys, which isn't reliable.",
+    inputSchema: { name: z.string().min(1), role: z.enum(['master', 'transactional']).optional() },
+  },
   async (input) => textResult(tools.add_table(input).summary),
 )
 

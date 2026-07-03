@@ -15,6 +15,10 @@ import {
 } from '../ui/alert-dialog'
 import { Dialog, DialogTrigger, DialogContent, DialogTitle, DialogDescription } from '../ui/dialog'
 import { FieldTypeSelect } from './FieldTypeSelect'
+import { TableRoleSelect } from './TableRoleSelect'
+import { TableRoleBadge } from './TableRoleBadge'
+import { cn } from '../../lib/cn'
+import type { TableRole } from '../../mutations/tableRole'
 
 export interface TableNodeField {
   id: number
@@ -29,12 +33,14 @@ export interface TableNodeData {
   name: string
   fields: TableNodeField[]
   createdAt: string
+  roleOverride: TableRole | null
   onAddField?: (tableId: number, name: string, type: string) => void
   onRenameTable?: (tableId: number, name: string) => void
   onRenameField?: (fieldId: number, name: string) => void
   onUpdateFieldType?: (fieldId: number, type: string) => void
   onDeleteTable?: (tableId: number) => void
   onDeleteField?: (fieldId: number) => void
+  onSetTableRole?: (tableId: number, role: TableRole | null) => void
   /** Relation view uses a single handle per table instead of per-field ones — dim the
    *  field-level handles rather than unmounting them, so field-level edges stay valid data. */
   hideFieldHandles?: boolean
@@ -43,6 +49,10 @@ export interface TableNodeData {
   summaryLines?: string[]
   /** Created since the last time this browser viewed this session — see lib/lastViewed.ts. */
   isNew?: boolean
+  /** True while the user hovers a relationship touching this table — see ErdCanvas's
+   *  highlightedTableIds. Transient, unlike `selected` (a persistent pick from the table list),
+   *  so it gets a lighter treatment that doesn't compete with it when both are true at once. */
+  highlighted?: boolean
   [key: string]: unknown
 }
 
@@ -178,7 +188,7 @@ function FieldRow({
   )
 }
 
-export function TableNode({ data }: NodeProps<TableNodeType>) {
+export function TableNode({ data, selected }: NodeProps<TableNodeType>) {
   const tableRef = useRef<HTMLTableElement>(null)
   const rowRefs = useRef(new Map<number, HTMLTableRowElement>())
   const [handleTops, setHandleTops] = useState<Record<number, number>>({})
@@ -203,7 +213,16 @@ export function TableNode({ data }: NodeProps<TableNodeType>) {
   }, [data.fields])
 
   return (
-    <div className="relative min-w-[200px] rounded-lg border border-line bg-surface text-sm shadow-lg">
+    <div
+      className={cn(
+        'relative min-w-[200px] rounded-lg border bg-surface text-sm shadow-lg transition-shadow',
+        selected
+          ? 'border-accent ring-2 ring-accent/50'
+          : data.highlighted
+            ? 'border-accent/70 ring-1 ring-accent/30'
+            : 'border-line',
+      )}
+    >
       {/* Stable per-table handles, independent of field rows — used by the relation view,
           which draws one edge per table pair instead of tracing to a specific field. Spread
           across several slots (not header-flex children, so percentage `top` is relative to
@@ -240,6 +259,12 @@ export function TableNode({ data }: NodeProps<TableNodeType>) {
       ))}
       <div className="group flex items-center justify-between rounded-t-lg bg-surface-raised px-3 py-1.5 font-display font-semibold text-ink">
         <div className="flex min-w-0 items-center gap-1.5">
+          <TableRoleSelect
+            compact
+            fields={data.fields}
+            roleOverride={data.roleOverride}
+            onSetTableRole={(role) => data.onSetTableRole?.(data.tableId, role)}
+          />
           <EditableText
             value={data.name}
             onCommit={(next) => data.onRenameTable?.(data.tableId, next)}
@@ -265,7 +290,10 @@ export function TableNode({ data }: NodeProps<TableNodeType>) {
               </button>
             </DialogTrigger>
             <DialogContent>
-              <DialogTitle>{data.name}</DialogTitle>
+              <DialogTitle className="flex items-center gap-2">
+                <TableRoleBadge fields={data.fields} roleOverride={data.roleOverride} compact />
+                {data.name}
+              </DialogTitle>
               {data.summaryLines && data.summaryLines.length > 0 ? (
                 <ul className="mt-3 list-disc space-y-1.5 pl-4 text-sm text-ink">
                   {data.summaryLines.map((line, i) => (

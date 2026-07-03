@@ -1,0 +1,1 @@
+ALTER TABLE `tables` ADD `role_override` text;

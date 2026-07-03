@@ -2,10 +2,19 @@ import { createServerFn } from '@tanstack/react-start'
 import { z } from 'zod'
 import { db } from '../db/client'
 import { getFullSchema } from '../mutations/getFullSchema'
-import { addTable, renameTable, updateTablePosition, deleteTable, getTable } from '../mutations/tables'
+import {
+  addTable,
+  renameTable,
+  updateTablePosition,
+  deleteTable,
+  getTable,
+  setAutoLayoutPosition,
+  setTableRole,
+} from '../mutations/tables'
 import { addField, renameField, updateField, deleteField, getField } from '../mutations/fields'
 import { addRelationship } from '../mutations/relationships'
 import { addChatMessage } from '../mutations/chatMessages'
+import { computeAutoLayout } from '../mutations/autoLayout'
 
 export const getFullSchemaFn = createServerFn()
   .validator(z.object({ sessionId: z.number() }))
@@ -33,6 +42,25 @@ export const renameTableFn = createServerFn({ method: 'POST' })
 export const updateTablePositionFn = createServerFn({ method: 'POST' })
   .validator(z.object({ tableId: z.number(), positionX: z.number(), positionY: z.number() }))
   .handler(async ({ data }) => updateTablePosition(db, data.tableId, data.positionX, data.positionY))
+
+export const setTableRoleFn = createServerFn({ method: 'POST' })
+  .validator(z.object({ tableId: z.number(), role: z.enum(['master', 'transactional']).nullable() }))
+  .handler(async ({ data }) => setTableRole(db, data.tableId, data.role))
+
+export const autoLayoutFn = createServerFn({ method: 'POST' })
+  .validator(z.object({ sessionId: z.number() }))
+  .handler(async ({ data }) => {
+    const schemaData = getFullSchema(db, data.sessionId)
+    const positions = computeAutoLayout(schemaData)
+    for (const table of schemaData.tables) {
+      const position = positions.get(table.id)
+      if (position) setAutoLayoutPosition(db, table.id, position.positionX, position.positionY)
+    }
+    if (schemaData.tables.length > 0) {
+      addChatMessage(db, data.sessionId, 'system', 'Tables auto-organized')
+    }
+    return getFullSchema(db, data.sessionId)
+  })
 
 export const deleteTableFn = createServerFn({ method: 'POST' })
   .validator(z.object({ tableId: z.number() }))

@@ -56,6 +56,16 @@ describe('relationship mutations', () => {
     expect(() => addRelationship(db, sessionId, orderUserIdField, userIdField, 'one-to-many')).toThrow()
   })
 
+  it('names the existing relationship and its id in the duplicate error, so a correction can target it directly', () => {
+    // This message surfaces verbatim to the AI as the add_relationship tool's error content (see
+    // node_modules/@modelcontextprotocol/sdk's tool error handling) — it needs to be enough on
+    // its own to go straight to update_relationship without a get_schema round-trip first.
+    const existing = addRelationship(db, sessionId, userIdField, orderUserIdField, 'one-to-many')
+    expect(() => addRelationship(db, sessionId, userIdField, orderUserIdField, 'one-to-one')).toThrow(
+      new RegExp(`relationship #${existing.id}.*one-to-many.*update_relationship.*#${existing.id}`, 's'),
+    )
+  })
+
   it('allows a self-referencing relationship between two different fields on the same table', () => {
     const managerIdField = addField(db, usersTableId, 'manager_id', 'uuid', false, true).id
     expect(() => addRelationship(db, sessionId, userIdField, managerIdField, 'one-to-many')).not.toThrow()

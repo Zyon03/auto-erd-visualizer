@@ -18,6 +18,15 @@ describe('createErdTools', () => {
     expect(result.summary).toBe('Added table `users`')
   })
 
+  it('lets the caller pin a table role at creation instead of leaving it to the FK heuristic', () => {
+    const tools = createErdTools(db, sessionId)
+    // Named/shaped like it could plausibly hold a foreign key later, but the AI already knows
+    // it's reference data — this is exactly the case the heuristic alone gets wrong.
+    const result = tools.add_table({ name: 'Employee', role: 'master' })
+    const table = result.data as { roleOverride: string | null }
+    expect(table.roleOverride).toBe('master')
+  })
+
   it('adds a field to a table', () => {
     const tools = createErdTools(db, sessionId)
     const table = tools.add_table({ name: 'users' }).data as { id: number }

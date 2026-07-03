@@ -6,6 +6,8 @@ import {
   renameTable,
   updateTablePosition,
   placeTableIfAutoPositioned,
+  setAutoLayoutPosition,
+  setTableRole,
   deleteTable,
   getTable,
 } from '../../src/mutations/tables'
@@ -67,6 +69,40 @@ describe('table mutations', () => {
     const result = placeTableIfAutoPositioned(db, table.id, 500, 500)
     expect(result?.positionX).toBe(500)
     expect(getTable(db, table.id)?.positionY).toBe(500)
+  })
+
+  it('setAutoLayoutPosition overwrites position even for a manually-moved table', () => {
+    const table = addTable(db, sessionId, 'users')
+    updateTablePosition(db, table.id, 120, 240)
+    expect(getTable(db, table.id)?.autoPositioned).toBe(false)
+
+    const result = setAutoLayoutPosition(db, table.id, 777, 888)
+    expect(result.positionX).toBe(777)
+    expect(result.positionY).toBe(888)
+    expect(result.autoPositioned).toBe(true)
+  })
+
+  it('defaults roleOverride to null when no role is given', () => {
+    const table = addTable(db, sessionId, 'users')
+    expect(table.roleOverride).toBeNull()
+  })
+
+  it('sets roleOverride at creation when a role is given', () => {
+    // The caller who already knows the answer (the AI, via mcp/erdTools.ts) can set this up
+    // front instead of leaving it to the FK-presence heuristic.
+    const table = addTable(db, sessionId, 'Employee', 'master')
+    expect(table.roleOverride).toBe('master')
+  })
+
+  it('setTableRole pins a table role, and null clears the pin', () => {
+    const table = addTable(db, sessionId, 'users')
+
+    const pinned = setTableRole(db, table.id, 'transactional')
+    expect(pinned.roleOverride).toBe('transactional')
+    expect(getTable(db, table.id)?.roleOverride).toBe('transactional')
+
+    const cleared = setTableRole(db, table.id, null)
+    expect(cleared.roleOverride).toBeNull()
   })
 
   it('deletes a table', () => {

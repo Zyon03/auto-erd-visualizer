@@ -20,6 +20,9 @@ export const tables = sqliteTable('tables', {
   positionY: real('position_y').notNull().default(0),
   autoPositioned: integer('auto_positioned', { mode: 'boolean' }).notNull().default(true),
   createdAt: text('created_at').notNull().default(sql`(current_timestamp)`),
+  // Null means "infer from whether the table has any foreign-key field" (see mutations/tableRole.ts)
+  // — this only exists to let a user pin a table that the heuristic gets wrong.
+  roleOverride: text('role_override', { enum: ['master', 'transactional'] }),
 })
 
 export const fields = sqliteTable('fields', {

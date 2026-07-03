@@ -32,13 +32,20 @@ export function addRelationship(
   }
 
   const existingForSession = db.select().from(relationships).where(eq(relationships.sessionId, sessionId)).all()
-  const isDuplicate = existingForSession.some(
+  const duplicate = existingForSession.find(
     (rel) =>
       (rel.fromFieldId === fromFieldId && rel.toFieldId === toFieldId) ||
       (rel.fromFieldId === toFieldId && rel.toFieldId === fromFieldId),
   )
-  if (isDuplicate) {
-    throw new Error('These two fields already have a relationship.')
+  if (duplicate) {
+    // Named specifically so the AI (this error surfaces as the add_relationship tool's error
+    // content) can correct a relationship it got wrong on the first pass — e.g. the user says
+    // "actually each user can only order once" — in one follow-up update_relationship call
+    // instead of a failed add, a get_schema round-trip to find the id, then the fix.
+    throw new Error(
+      `These two fields already have relationship #${duplicate.id} (currently ${duplicate.cardinality}). ` +
+        `Use update_relationship on #${duplicate.id} to correct it instead of adding a new one.`,
+    )
   }
 
   const [row] = db

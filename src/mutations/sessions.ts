@@ -34,6 +34,12 @@ export function deleteSession(db: Db, id: number): Session | undefined {
 }
 
 export function listSessions(db: Db): SessionSummary[] {
+  // Not a correlated subquery on purpose: `tables` also has its own `id` column, and the
+  // scalar-subquery form (`select count(*) from tables where session_id = sessions.id`) let
+  // drizzle's raw-sql interpolation emit an unqualified "id" for sessions.id — inside the
+  // subquery's own scope that resolves to tables.id instead, silently counting only the
+  // coincidental rows where a table's id happened to equal its session's id. A real LEFT JOIN
+  // qualifies every column through the query builder, so there's no ambiguity to resolve wrong.
   return db
     .select({
       id: sessions.id,
@@ -42,9 +48,11 @@ export function listSessions(db: Db): SessionSummary[] {
       model: sessions.model,
       createdAt: sessions.createdAt,
       updatedAt: sessions.updatedAt,
-      tableCount: sql<number>`(select count(*) from ${tables} where ${tables.sessionId} = ${sessions.id})`,
+      tableCount: sql<number>`count(${tables.id})`,
     })
     .from(sessions)
+    .leftJoin(tables, eq(tables.sessionId, sessions.id))
+    .groupBy(sessions.id)
     .all()
 }
 

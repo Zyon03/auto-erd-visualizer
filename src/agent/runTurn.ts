@@ -18,6 +18,8 @@ import { createStreamJsonParser } from "./parseStreamJson";
 import { resolveTurnMessage } from "./resolveTurnMessage";
 import { registerRunningTurn, clearRunningTurn } from "./runningTurns";
 import { encodeQuestion } from "./questionMessage";
+import { classifySpawnError, classifyFailureText, type AgentErrorKind } from "./classifyAgentError";
+import { encodeAgentError } from "./agentErrorMessage";
 
 type Db = BetterSQLite3Database<typeof schema>;
 
@@ -36,6 +38,18 @@ const SYSTEM_PROMPT =
   "reference data (relatively static lookup entities, e.g. M_User, M_Product, M_Category) and `T_` for " +
   "transactional data (records of events or activity, e.g. T_Order, T_Payment, T_LoginLog). If a table is a " +
   "many-to-many join table, name it after the two things it connects (e.g. T_OrderItem).\n\n" +
+  "Table role: always set add_table's `role` param (master or transactional) using that same distinction — " +
+  "what the table represents, not whether it happens to hold a foreign key. A table that references another " +
+  "table is not automatically transactional (e.g. an Employee table with a department_id FK is still master " +
+  "data); the app can only guess from foreign keys when `role` is left unset, and that guess is unreliable.\n\n" +
+  "Corrections: when the user restates or contradicts something already modeled (e.g. \"actually each user can " +
+  "only order once\" after users/orders was built as one-to-many), that's a correction, not a new fact — find " +
+  "the existing relationship (get_schema, or the id from a prior tool result this conversation) and fix it with " +
+  "update_relationship rather than calling add_relationship again. add_relationship will refuse a field pair " +
+  "that's already connected and name the existing relationship's id in the error specifically so you can recover " +
+  "in one follow-up call; use that id directly instead of re-fetching the whole schema to find it. The same " +
+  "applies to tables and fields the user is correcting, not just relationships — rename/update/delete the " +
+  "existing one rather than adding a second, contradictory one next to it.\n\n" +
   "Clarifying questions: use ask_question when a requirement is genuinely ambiguous and the decision " +
   "meaningfully shapes the schema — e.g. a cardinality that could reasonably go either way, whether " +
   "something needs soft-deletes or an audit trail, whether a repeated value should be normalized into its " +
@@ -66,7 +80,7 @@ export type TurnEvent =
   | { type: "assistant_note"; text: string }
   | { type: "ask_question"; question: string; choices: string[]; allowMultiple: boolean }
   | { type: "turn_complete"; text: string }
-  | { type: "turn_error"; message: string };
+  | { type: "turn_error"; kind: AgentErrorKind; message: string; hint?: string };
 
 export function runTurn(
   db: Db,
@@ -125,6 +139,17 @@ export function runTurn(
   let settled = false;
   let cancelledByUser = false;
 
+  // Drained (not just piped to readline like stdout) so a chatty stderr can't fill the OS pipe
+  // buffer and block the child process — and so its text is available to classify failures
+  // (e.g. "not logged in") that only show up on stderr, not in stdout's stream-json.
+  let stderrBuffer = "";
+  const MAX_STDERR_LEN = 8000;
+  child.stderr.on("data", (chunk: Buffer) => {
+    if (stderrBuffer.length < MAX_STDERR_LEN) {
+      stderrBuffer = (stderrBuffer + chunk.toString()).slice(0, MAX_STDERR_LEN);
+    }
+  });
+
   registerRunningTurn(sessionId, {
     cancel: () => {
       cancelledByUser = true;
@@ -137,6 +162,7 @@ export function runTurn(
     child.kill("SIGTERM");
     finish({
       type: "turn_error",
+      kind: "other",
       message:
         "The AI stopped responding and was cancelled after 5 minutes of inactivity.",
     });
@@ -146,11 +172,27 @@ export function runTurn(
     watchdog.refresh();
   }
 
+  // The session can be deleted out from under a turn that's still streaming (the delete handler
+  // cancels the child process, but its exit is asynchronous). Once that's happened there's no
+  // longer a row to write chat messages against (FK violation) and no one listening for
+  // onEvent — worse, onEvent's publishTurnEvent would silently recreate a session emitter that
+  // was just deleted, undoing the leak cleanup on session delete. Checked once and cached since
+  // a deleted session never comes back.
+  let sessionGone = false;
+  function checkSessionGone(): boolean {
+    if (!sessionGone && !getSession(db, sessionId)) {
+      sessionGone = true;
+    }
+    return sessionGone;
+  }
+
   function finish(event: TurnEvent) {
     if (settled) return;
     settled = true;
     clearTimeout(watchdog);
     clearRunningTurn(sessionId);
+
+    if (checkSessionGone()) return;
 
     if (event.type === "turn_error" && !streamedAnything && !cancelledByUser) {
       clearClaudeSessionId(db, sessionId);
@@ -159,7 +201,11 @@ export function runTurn(
     if (event.type === "turn_complete" && event.text) {
       addChatMessage(db, sessionId, "assistant", event.text);
     } else if (event.type === "turn_error") {
-      addChatMessage(db, sessionId, "system", event.message);
+      const content =
+        (event.kind === "not_installed" || event.kind === "not_authenticated") && event.hint
+          ? encodeAgentError({ kind: event.kind, message: event.message, hint: event.hint })
+          : event.message;
+      addChatMessage(db, sessionId, "system", content);
     }
 
     onEvent(event);
@@ -168,6 +214,7 @@ export function runTurn(
   rl.on("line", (line) => {
     resetWatchdog();
     streamedAnything = true;
+    if (checkSessionGone()) return;
 
     for (const evt of parser.parseLine(line)) {
       if (evt.kind === "tool_step") {
@@ -197,39 +244,50 @@ export function runTurn(
           allowMultiple: evt.allowMultiple,
         });
       } else if (evt.kind === "turn_result") {
-        finish(
-          evt.success
-            ? { type: "turn_complete", text: evt.text }
-            : {
-                type: "turn_error",
-                message: evt.text || "The AI turn ended with an error.",
-              },
-        );
+        if (evt.success) {
+          finish({ type: "turn_complete", text: evt.text });
+        } else {
+          const text = evt.text || "The AI turn ended with an error.";
+          const { kind, hint } = classifyFailureText(text);
+          finish({ type: "turn_error", kind, hint, message: text });
+        }
       }
     }
   });
 
-  child.on("error", () => {
+  child.on("error", (err) => {
+    const { kind, hint } = classifySpawnError(err as NodeJS.ErrnoException);
     finish({
       type: "turn_error",
-      message: "Failed to start the AI agent process.",
+      kind,
+      hint,
+      message:
+        kind === "not_installed"
+          ? "Couldn't find the Claude Code CLI on this machine."
+          : `Failed to start the AI agent process (${(err as Error).message}).`,
     });
   });
 
   child.on("close", (code) => {
     if (settled) return;
     if (cancelledByUser) {
-      finish({ type: "turn_error", message: "Stopped." });
+      finish({ type: "turn_error", kind: "other", message: "Stopped." });
       return;
     }
-    finish(
-      code === 0
-        ? { type: "turn_complete", text: "" }
-        : {
-            type: "turn_error",
-            message: `The AI process exited unexpectedly (code ${code}).`,
-          },
-    );
+    if (code === 0) {
+      finish({ type: "turn_complete", text: "" });
+      return;
+    }
+    const { kind, hint } = classifyFailureText(stderrBuffer);
+    finish({
+      type: "turn_error",
+      kind,
+      hint,
+      message:
+        kind === "not_authenticated"
+          ? "Claude Code isn't logged in on this machine."
+          : `The AI process exited unexpectedly (code ${code}).`,
+    });
   });
 
   return userMessageRow;

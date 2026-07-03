@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useServerFn } from '@tanstack/react-start'
-import { Send, Square, ChevronDown, ChevronUp, Minimize2 } from 'lucide-react'
+import { Send, Square, ChevronDown, ChevronUp, Maximize2, Minimize2, PanelBottomClose } from 'lucide-react'
 import { sendMessageFn, cancelTurnFn } from '../../server-fns/chat'
 import { useSessionEvents } from '../../hooks/useSessionEvents'
 import { ChatMessageBubble } from './ChatMessageBubble'
@@ -8,6 +8,8 @@ import { Button } from '../ui/button'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../ui/select'
 import { MODEL_OPTIONS } from '../../agent/models'
 import { encodeQuestion } from '../../agent/questionMessage'
+import { encodeAgentError } from '../../agent/agentErrorMessage'
+import type { AgentErrorKind } from '../../agent/classifyAgentError'
 import type { ChatMessage } from '../../mutations/chatMessages'
 
 type TurnEvent =
@@ -15,9 +17,9 @@ type TurnEvent =
   | { type: 'assistant_note'; text: string }
   | { type: 'ask_question'; question: string; choices: string[]; allowMultiple: boolean }
   | { type: 'turn_complete'; text: string }
-  | { type: 'turn_error'; message: string }
+  | { type: 'turn_error'; kind: AgentErrorKind; message: string; hint?: string }
 
-type ChatMode = 'full' | 'compact' | 'hidden'
+type ChatMode = 'expanded' | 'full' | 'compact' | 'hidden'
 
 const DEFAULT_MODEL_VALUE = 'default'
 
@@ -27,19 +29,42 @@ export interface ChatPanelProps {
   onSchemaMayHaveChanged: () => void
   model: string | null
   onModelChange: (model: string) => void
+  /** A table can exist with zero chat messages (added directly on the canvas, no AI turn ever
+   *  run) — the centered "describe your system" prompt is misleading once there's already a
+   *  schema, so it should only show for a truly blank session, not just an empty chat log. */
+  hasTables: boolean
 }
 
-export function ChatPanel({ sessionId, initialMessages, onSchemaMayHaveChanged, model, onModelChange }: ChatPanelProps) {
+export function ChatPanel({
+  sessionId,
+  initialMessages,
+  onSchemaMayHaveChanged,
+  model,
+  onModelChange,
+  hasTables,
+}: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages)
   const [draft, setDraft] = useState('')
   const [turnInFlight, setTurnInFlight] = useState(false)
   const [workingNote, setWorkingNote] = useState<string | null>(null)
   const [chatMode, setChatMode] = useState<ChatMode>('full')
   const nextLocalId = useRef(-1)
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     setMessages(initialMessages)
   }, [sessionId])
+
+  // Message history opens on the most recent message, not the oldest — the scrollable region is
+  // remounted whenever chatMode toggles away from 'full' and back (see the conditional render
+  // below), which resets scrollTop to 0 each time, so this has to re-run on chatMode too, not
+  // just when messages change. useLayoutEffect (not useEffect) so the jump happens before paint
+  // and never flashes the oldest message first.
+  useLayoutEffect(() => {
+    const el = scrollContainerRef.current
+    if (!el) return
+    el.scrollTop = el.scrollHeight
+  }, [messages, chatMode])
 
   const sendMessage = useServerFn(sendMessageFn)
   const cancelTurn = useServerFn(cancelTurnFn)
@@ -85,9 +110,13 @@ export function ChatPanel({ sessionId, initialMessages, onSchemaMayHaveChanged, 
       onSchemaMayHaveChanged()
     } else if (event.type === 'turn_error') {
       setWorkingNote(null)
+      const content =
+        (event.kind === 'not_installed' || event.kind === 'not_authenticated') && event.hint
+          ? encodeAgentError({ kind: event.kind, message: event.message, hint: event.hint })
+          : event.message
       setMessages((prev) => [
         ...prev,
-        { id: nextLocalId.current--, sessionId, role: 'system', content: event.message, createdAt: '' },
+        { id: nextLocalId.current--, sessionId, role: 'system', content, createdAt: '' },
       ])
       setTurnInFlight(false)
     }
@@ -156,7 +185,7 @@ export function ChatPanel({ sessionId, initialMessages, onSchemaMayHaveChanged, 
     )
   }
 
-  if (!hasMessages) {
+  if (!hasMessages && !hasTables) {
     return (
       <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
         <div className="pointer-events-auto w-full max-w-lg px-6">
@@ -167,7 +196,7 @@ export function ChatPanel({ sessionId, initialMessages, onSchemaMayHaveChanged, 
               className="rounded p-1 text-ink-faint hover:bg-surface-raised hover:text-ink"
               title="Hide chat"
             >
-              <Minimize2 size={13} />
+              <PanelBottomClose size={13} />
             </button>
           </div>
           <p className="mb-3 text-center text-sm text-ink-muted">Describe the system you want to model...</p>
@@ -190,30 +219,45 @@ export function ChatPanel({ sessionId, initialMessages, onSchemaMayHaveChanged, 
     )
   }
 
+  const isHistoryVisible = chatMode === 'full' || chatMode === 'expanded'
+  const isExpanded = chatMode === 'expanded'
+
   return (
-    <div className="pointer-events-none absolute bottom-4 left-1/2 w-full max-w-xl -translate-x-1/2 px-4">
+    <div
+      className={`pointer-events-none absolute bottom-4 left-1/2 w-full -translate-x-1/2 px-4 ${isExpanded ? 'max-w-2xl' : 'max-w-xl'}`}
+    >
       <div className="pointer-events-auto overflow-hidden rounded-xl border border-line bg-surface/70 shadow-2xl backdrop-blur-md">
         <div className="flex items-center justify-between gap-2 border-b border-line/70 px-2 py-1">
           {modelSelect}
           <div className="flex items-center gap-0.5">
             <button
-              onClick={() => setChatMode(chatMode === 'compact' ? 'full' : 'compact')}
+              onClick={() => setChatMode(isHistoryVisible ? 'compact' : 'full')}
               className="rounded p-1 text-ink-faint hover:bg-surface-raised hover:text-ink"
-              title={chatMode === 'compact' ? 'Show message history' : 'Hide message history'}
+              title={isHistoryVisible ? 'Hide message history' : 'Show message history'}
             >
-              {chatMode === 'compact' ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+              {isHistoryVisible ? <ChevronDown size={13} /> : <ChevronUp size={13} />}
+            </button>
+            <button
+              onClick={() => setChatMode(isExpanded ? 'full' : 'expanded')}
+              className="rounded p-1 text-ink-faint hover:bg-surface-raised hover:text-ink"
+              title={isExpanded ? 'Collapse chat' : 'Expand chat'}
+            >
+              {isExpanded ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
             </button>
             <button
               onClick={() => setChatMode('hidden')}
               className="rounded p-1 text-ink-faint hover:bg-surface-raised hover:text-ink"
               title="Hide chat"
             >
-              <Minimize2 size={13} />
+              <PanelBottomClose size={13} />
             </button>
           </div>
         </div>
-        {chatMode === 'full' && (
-          <div className="max-h-64 space-y-2 overflow-y-auto px-3 pt-3 [mask-image:linear-gradient(to_bottom,transparent,black_16px)]">
+        {isHistoryVisible && (
+          <div
+            ref={scrollContainerRef}
+            className={`space-y-2 overflow-y-auto px-3 pt-3 [mask-image:linear-gradient(to_bottom,transparent,black_16px)] ${isExpanded ? 'max-h-[70vh]' : 'max-h-64'}`}
+          >
             {messages.map((message, index) => (
               <ChatMessageBubble
                 key={message.id}

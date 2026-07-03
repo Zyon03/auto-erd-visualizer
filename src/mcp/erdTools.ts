@@ -4,6 +4,7 @@ import { addTable, renameTable, deleteTable } from '../mutations/tables'
 import { addField, renameField, updateField, deleteField } from '../mutations/fields'
 import { addRelationship, updateRelationship, deleteRelationship, type Cardinality } from '../mutations/relationships'
 import { getFullSchema } from '../mutations/getFullSchema'
+import type { TableRole } from '../mutations/tableRole'
 
 type Db = BetterSQLite3Database<typeof schema>
 
@@ -19,8 +20,8 @@ export function createErdTools(db: Db, sessionId: number) {
       return { summary: `Schema has ${schemaData.tables.length} table(s).`, data: schemaData }
     },
 
-    add_table: (input: { name: string }): ErdToolResult => {
-      const table = addTable(db, sessionId, input.name)
+    add_table: (input: { name: string; role?: TableRole }): ErdToolResult => {
+      const table = addTable(db, sessionId, input.name, input.role ?? null)
       return { summary: `Added table \`${table.name}\``, data: table }
     },
 

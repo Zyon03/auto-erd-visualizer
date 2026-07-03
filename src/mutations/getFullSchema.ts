@@ -14,6 +14,7 @@ export interface TableWithFields {
   positionX: number
   positionY: number
   createdAt: string
+  roleOverride: 'master' | 'transactional' | null
   fields: Field[]
 }
 

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { schemaToNodes, schemaToEdges, schemaToTableEdges } from '../../../src/components/erd/schemaToFlow'
+import { schemaToNodes, schemaToEdges, schemaToTableEdges, schemaToNodesWithReuse } from '../../../src/components/erd/schemaToFlow'
 import type { FullSchema } from '../../../src/mutations/getFullSchema'
+import type { TableNodeType, TableNodeData } from '../../../src/components/erd/TableNode'
 
 const sampleSchema: FullSchema = {
   tables: [
@@ -11,6 +12,7 @@ const sampleSchema: FullSchema = {
       positionX: 10,
       positionY: 20,
       createdAt: '2026-01-01 00:00:00',
+      roleOverride: null,
       fields: [{ id: 1, tableId: 1, name: 'id', type: 'uuid', isPrimaryKey: true, isForeignKey: false, order: 0 }],
     },
     {
@@ -20,6 +22,7 @@ const sampleSchema: FullSchema = {
       positionX: 300,
       positionY: 20,
       createdAt: '2026-01-01 00:00:00',
+      roleOverride: null,
       fields: [
         { id: 2, tableId: 2, name: 'user_id', type: 'uuid', isPrimaryKey: false, isForeignKey: true, order: 0 },
       ],
@@ -73,6 +76,7 @@ describe('schemaToTableEdges', () => {
           positionX: 300,
           positionY: 20,
           createdAt: '2026-01-01 00:00:00',
+          roleOverride: null,
           fields: [
             { id: 2, tableId: 2, name: 'user_id', type: 'uuid', isPrimaryKey: false, isForeignKey: true, order: 0 },
             {
@@ -104,8 +108,8 @@ describe('schemaToTableEdges', () => {
       tables: [
         sampleSchema.tables[0],
         sampleSchema.tables[1],
-        { id: 3, sessionId: 1, name: 'reviews', positionX: 0, positionY: 0, createdAt: '2026-01-01 00:00:00', fields: [{ id: 3, tableId: 3, name: 'user_id', type: 'uuid', isPrimaryKey: false, isForeignKey: true, order: 0 }] },
-        { id: 4, sessionId: 1, name: 'sessions', positionX: 0, positionY: 0, createdAt: '2026-01-01 00:00:00', fields: [{ id: 4, tableId: 4, name: 'user_id', type: 'uuid', isPrimaryKey: false, isForeignKey: true, order: 0 }] },
+        { id: 3, sessionId: 1, name: 'reviews', positionX: 0, positionY: 0, createdAt: '2026-01-01 00:00:00', roleOverride: null, fields: [{ id: 3, tableId: 3, name: 'user_id', type: 'uuid', isPrimaryKey: false, isForeignKey: true, order: 0 }] },
+        { id: 4, sessionId: 1, name: 'sessions', positionX: 0, positionY: 0, createdAt: '2026-01-01 00:00:00', roleOverride: null, fields: [{ id: 4, tableId: 4, name: 'user_id', type: 'uuid', isPrimaryKey: false, isForeignKey: true, order: 0 }] },
       ],
       relationships: [
         { id: 1, sessionId: 1, fromFieldId: 1, toFieldId: 2, cardinality: 'one-to-many', aiComment: '' },
@@ -127,5 +131,96 @@ describe('schemaToTableEdges', () => {
       relationships: [{ id: 3, sessionId: 1, fromFieldId: 1, toFieldId: 1, cardinality: 'one-to-many', aiComment: '' }],
     }
     expect(schemaToTableEdges(selfReferencing)).toHaveLength(0)
+  })
+})
+
+describe('schemaToNodesWithReuse', () => {
+  const noop = () => {}
+  const baseExtras = {
+    onAddField: noop,
+    onRenameTable: noop,
+    onRenameField: noop,
+    onUpdateFieldType: noop,
+    onDeleteTable: noop,
+    onDeleteField: noop,
+    onSetTableRole: noop,
+    hideFieldHandles: false,
+    newSinceThreshold: '9999-01-01 00:00:00',
+  }
+
+  function toMap(nodes: TableNodeType[]): Map<string, TableNodeType> {
+    return new Map(nodes.map((n) => [n.id, n]))
+  }
+
+  // No aiComment on the users->orders relationship — its summary line falls back to a structural
+  // description that names the *other* table, which is exactly the case that can go stale if a
+  // table's node is only invalidated by comparing its own row.
+  const schemaNoComment: FullSchema = {
+    tables: sampleSchema.tables,
+    relationships: [{ id: 1, sessionId: 1, fromFieldId: 1, toFieldId: 2, cardinality: 'one-to-many', aiComment: '' }],
+  }
+
+  it('reuses every node when nothing changed', () => {
+    const first = schemaToNodesWithReuse(schemaNoComment, new Map(), baseExtras)
+    const second = schemaToNodesWithReuse(schemaNoComment, toMap(first), baseExtras)
+
+    expect(second[0]).toBe(first[0])
+    expect(second[1]).toBe(first[1])
+  })
+
+  it('gives a changed table a new node, but leaves an unrelated table untouched', () => {
+    const first = schemaToNodesWithReuse(schemaNoComment, new Map(), baseExtras)
+    const moved: FullSchema = {
+      ...schemaNoComment,
+      tables: [{ ...schemaNoComment.tables[0], positionX: 999 }, schemaNoComment.tables[1]],
+    }
+    const second = schemaToNodesWithReuse(moved, toMap(first), baseExtras)
+
+    expect(second[0]).not.toBe(first[0])
+    expect(second[0].position.x).toBe(999)
+    expect(second[1]).toBe(first[1])
+  })
+
+  it('invalidates a table whose relationship summary text changes because the *other* table was renamed', () => {
+    // orders' own row is untouched — only users' name changes, which feeds into orders' computed
+    // summaryLines ("one-to-many relationship with users" -> "...with People"). If invalidation
+    // only compared a table's own row, orders would incorrectly keep showing the stale text.
+    const first = schemaToNodesWithReuse(schemaNoComment, new Map(), baseExtras)
+    expect(first[1].data.summaryLines).toEqual(['one-to-many relationship with users'])
+
+    const renamed: FullSchema = {
+      ...schemaNoComment,
+      tables: [{ ...schemaNoComment.tables[0], name: 'People' }, schemaNoComment.tables[1]],
+    }
+    const second = schemaToNodesWithReuse(renamed, toMap(first), baseExtras)
+
+    expect(second[1]).not.toBe(first[1])
+    expect(second[1].data.summaryLines).toEqual(['one-to-many relationship with People'])
+  })
+
+  it('treats a changed handler reference as a change, for every table', () => {
+    const first = schemaToNodesWithReuse(schemaNoComment, new Map(), baseExtras)
+    const differentHandler: TableNodeData['onDeleteTable'] = () => {}
+    const second = schemaToNodesWithReuse(schemaNoComment, toMap(first), { ...baseExtras, onDeleteTable: differentHandler })
+
+    expect(second[0]).not.toBe(first[0])
+    expect(second[1]).not.toBe(first[1])
+  })
+
+  it('creates a fresh node for a newly added table without disturbing existing ones', () => {
+    const first = schemaToNodesWithReuse(schemaNoComment, new Map(), baseExtras)
+    const withNewTable: FullSchema = {
+      ...schemaNoComment,
+      tables: [
+        ...schemaNoComment.tables,
+        { id: 3, sessionId: 1, name: 'tags', positionX: 0, positionY: 0, createdAt: '2026-01-01 00:00:00', roleOverride: null, fields: [] },
+      ],
+    }
+    const second = schemaToNodesWithReuse(withNewTable, toMap(first), baseExtras)
+
+    expect(second).toHaveLength(3)
+    expect(second[0]).toBe(first[0])
+    expect(second[1]).toBe(first[1])
+    expect(second[2].id).toBe('3')
   })
 })
