@@ -227,6 +227,20 @@ export function ChatPanel({
           ...prev,
           { id: nextLocalId.current--, sessionId, role: 'assistant', content: event.text, createdAt: '' },
         ])
+      } else {
+        // A turn can succeed with zero output -- no closing text, no tool calls. Tagged the same
+        // always-visible way as turn_error (see runTurn.ts's finish()) so this never reads as
+        // "thinking just silently stopped," which otherwise looks identical to an actual hang.
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: nextLocalId.current--,
+            sessionId,
+            role: 'system',
+            content: encodeAgentError({ kind: 'other', message: "The AI didn't reply that time." }),
+            createdAt: '',
+          },
+        ])
       }
       setTurnInFlight(false)
       onSchemaMayHaveChanged()

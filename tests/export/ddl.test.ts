@@ -24,4 +24,21 @@ describe('generateDdl', () => {
     expect(ddl).toContain('CREATE TABLE orders (')
     expect(ddl).toContain('ALTER TABLE orders ADD FOREIGN KEY (user_id) REFERENCES users(id);')
   })
+
+  it('carries a length/precision set on a field type straight into the column definition', () => {
+    // `type` is a single free-text column -- a length like "varchar(255)" (set via the type UI's
+    // length input, or written directly by the AI) needs no special handling here at all, since
+    // it's interpolated as-is; this just locks that in against a future refactor assuming `type`
+    // is always a bare keyword.
+    const db = createDb(':memory:')
+    const sessionId = createSession(db, 'Session').id
+    const users = addTable(db, sessionId, 'users')
+    addField(db, users.id, 'email', 'varchar(255)')
+    addField(db, users.id, 'balance', 'decimal(10,2)')
+
+    const ddl = generateDdl(db, sessionId)
+
+    expect(ddl).toContain('email varchar(255)')
+    expect(ddl).toContain('balance decimal(10,2)')
+  })
 })

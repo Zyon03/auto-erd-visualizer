@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../ui/select'
 import { FIELD_TYPES, CUSTOM_FIELD_TYPE } from './fieldTypes'
+import { parseFieldType } from './fieldTypeParams'
 
 const KNOWN_TYPES: readonly string[] = FIELD_TYPES
 
@@ -13,7 +14,17 @@ export function FieldTypeSelect({
   onChange: (type: string) => void
   className?: string
 }) {
-  const isKnown = KNOWN_TYPES.includes(value)
+  // Matched against the parsed *base* type, not the raw value -- "varchar(255)" must still show
+  // "varchar" selected in the dropdown rather than falling into the unknown/custom bucket just
+  // because of its embedded length. The length/precision inputs themselves live in TableNode,
+  // right next to this component, operating on the same raw `value` string independently.
+  const { base } = parseFieldType(value)
+  const isKnown = KNOWN_TYPES.includes(base)
+  // Radix Select's own `value` must match one of its items' values exactly. A known base (e.g.
+  // "varchar" parsed out of "varchar(255)") matches the FIELD_TYPES item for "varchar"; anything
+  // else falls back to matching against the raw string, same as before this component knew how
+  // to parse a length out of anything.
+  const selectValue = isKnown ? base : value
   const [customMode, setCustomMode] = useState(false)
   const [customDraft, setCustomDraft] = useState('')
 
@@ -33,18 +44,20 @@ export function FieldTypeSelect({
 
   return (
     <Select
-      value={value}
+      value={selectValue}
       onValueChange={(next) => {
         if (next === CUSTOM_FIELD_TYPE) {
           setCustomMode(true)
           setCustomDraft(isKnown ? '' : value)
           return
         }
+        // Picking a fresh base type from the list, not adjusting the current one -- drops any
+        // previous length/precision (e.g. varchar(255) -> decimal shouldn't become decimal(255)).
         onChange(next)
       }}
     >
       <SelectTrigger className={className}>
-        <SelectValue placeholder={value || 'type'} />
+        <SelectValue placeholder={selectValue || 'type'} />
       </SelectTrigger>
       <SelectContent>
         {/* An AI-set or otherwise non-curated type (e.g. "integer") still needs to appear

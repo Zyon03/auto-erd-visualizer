@@ -44,17 +44,17 @@ const schema: FullSchema = {
 }
 
 describe('summarizeTable', () => {
-  it('uses the existing AI-written note when present', () => {
-    expect(summarizeTable(schema, 1)).toContain('A user has many orders')
+  it('prefixes the existing AI-written note with both table names bolded, plus the cardinality', () => {
+    expect(summarizeTable(schema, 1)).toContain('**users** ↔ **orders** — A user has many orders (one-to-many)')
   })
 
-  it('falls back to a structural description when aiComment is empty', () => {
+  it('falls back to just the bolded table names and cardinality when aiComment is empty', () => {
     const lines = summarizeTable(schema, 1)
-    expect(lines).toContain('many-to-many relationship with tags')
+    expect(lines).toContain('**users** ↔ **tags** (many-to-many)')
   })
 
-  it('includes relationships from either side of the table', () => {
-    expect(summarizeTable(schema, 2)).toEqual(['A user has many orders'])
+  it('includes relationships from either side of the table, naming this table first', () => {
+    expect(summarizeTable(schema, 2)).toEqual(['**orders** ↔ **users** — A user has many orders (one-to-many)'])
   })
 
   it('returns an empty list for a table with no relationships', () => {

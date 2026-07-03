@@ -1,7 +1,7 @@
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import * as schema from '../db/schema'
-import { addTable, renameTable, deleteTable } from '../mutations/tables'
-import { addField, renameField, updateField, deleteField } from '../mutations/fields'
+import { addTable, renameTable, deleteTable, getTable } from '../mutations/tables'
+import { addField, renameField, updateField, deleteField, getField } from '../mutations/fields'
 import { addRelationship, updateRelationship, deleteRelationship, type Cardinality } from '../mutations/relationships'
 import { getFullSchema } from '../mutations/getFullSchema'
 import { getSession, renameSession } from '../mutations/sessions'
@@ -15,6 +15,18 @@ type Db = BetterSQLite3Database<typeof schema>
 // a name someone set on purpose, including the edge case of renaming before ever sending a
 // first chat message.
 const DEFAULT_SESSION_NAME_PATTERN = /^Session \d+$/
+
+/** `Table.field` for a relationship's activity-log line -- without this, every add_relationship
+ *  step reads as the identical generic "Linked fields with a one-to-many relationship" regardless
+ *  of which fields were actually involved, which is exactly why a many-to-many built correctly as
+ *  two one-to-many join-table FKs (the only way to represent M:N in a real relational schema)
+ *  reads as suspicious/repetitive in the log instead of self-explanatory. */
+function describeField(db: Db, fieldId: number): string {
+  const field = getField(db, fieldId)
+  if (!field) return `field #${fieldId}`
+  const table = getTable(db, field.tableId)
+  return table ? `${table.name}.${field.name}` : field.name
+}
 
 export interface ErdToolResult {
   summary: string
@@ -82,7 +94,9 @@ export function createErdTools(db: Db, sessionId: number) {
       aiComment?: string
     }): ErdToolResult => {
       const rel = addRelationship(db, sessionId, input.fromFieldId, input.toFieldId, input.cardinality, input.aiComment ?? '')
-      return { summary: `Linked fields with a ${rel.cardinality} relationship`, data: rel }
+      const from = describeField(db, input.fromFieldId)
+      const to = describeField(db, input.toFieldId)
+      return { summary: `Linked \`${from}\` → \`${to}\` (${rel.cardinality})`, data: rel }
     },
 
     update_relationship: (input: {

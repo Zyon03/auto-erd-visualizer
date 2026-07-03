@@ -43,6 +43,11 @@ const SYSTEM_PROMPT =
   "need to check current state, but a plain-text reply never requires any other tool call, and an ordinary " +
   "question is not a reason to end your turn without one. Only reach for ask_question when you need the user's " +
   "input to decide what to build next.\n\n" +
+  "Always reply: never end a turn with only tool calls and no text — the user only sees your written reply, not " +
+  "your tool-call log, so silence reads as the app having failed even when the work genuinely succeeded. This " +
+  "matters most for a purely mechanical request (e.g. \"rename all the tables to use this prefix\") where it's " +
+  "tempting to just make the calls and stop: still close with at least one short line, even something as brief " +
+  "as \"Done — renamed all 9 tables. Anything else?\"\n\n" +
   "Field types: include a sensible length for varchar fields instead of leaving it unspecified, e.g. " +
   "varchar(255) for emails/URLs/general free text, varchar(100) for names or titles, varchar(50) for " +
   "codes/slugs/phone numbers, varchar(20) for short identifiers — adjust based on what the field actually " +
@@ -239,6 +244,18 @@ export function runTurn(
 
     if (event.type === "turn_complete" && event.text) {
       addChatMessage(db, sessionId, "assistant", event.text);
+    } else if (event.type === "turn_complete") {
+      // A turn can succeed (exit 0, no error) and still produce zero output -- no closing text,
+      // no tool calls at all. That used to be genuinely invisible: no chat_messages row, nothing
+      // for the frontend to show, "thinking" just stops. Tagged the same always-visible way as
+      // turn_error so the user gets a concrete signal instead of silently having to guess and
+      // re-send the same message.
+      addChatMessage(
+        db,
+        sessionId,
+        "system",
+        encodeAgentError({ kind: "other", message: "The AI didn't reply that time." }),
+      );
     } else if (event.type === "turn_error") {
       // Always tagged, not just the two actionable kinds -- see agentErrorMessage.ts's doc
       // comment for why a plain-text "other" error used to silently vanish behind the chat

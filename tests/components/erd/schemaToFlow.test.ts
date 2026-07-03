@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { schemaToNodes, schemaToEdges, schemaToTableEdges, schemaToNodesWithReuse } from '../../../src/components/erd/schemaToFlow'
 import type { FullSchema } from '../../../src/mutations/getFullSchema'
+import type { Cardinality } from '../../../src/mutations/relationships'
 import type { TableNodeType, TableNodeData } from '../../../src/components/erd/TableNode'
 
 const sampleSchema: FullSchema = {
@@ -132,6 +133,40 @@ describe('schemaToTableEdges', () => {
     }
     expect(schemaToTableEdges(selfReferencing)).toHaveLength(0)
   })
+
+  it('keeps a many-to-many join table as two literal one-to-many lines, not a synthesized single line', () => {
+    // Movie <-> Genre via a pure join table -- deliberately NOT collapsed into one M:N line (see
+    // schemaToTableEdges's doc comment): the join table isn't optional in the real schema this
+    // app exports, so relation view must not visually suggest it can be skipped.
+    const movieGenreSchema: FullSchema = {
+      tables: [
+        { id: 1, sessionId: 1, name: 'Movie', positionX: 0, positionY: 0, createdAt: '2026-01-01 00:00:00', roleOverride: null, fields: [{ id: 1, tableId: 1, name: 'id', type: 'uuid', isPrimaryKey: true, isForeignKey: false, order: 0 }] },
+        { id: 2, sessionId: 1, name: 'Genre', positionX: 0, positionY: 0, createdAt: '2026-01-01 00:00:00', roleOverride: null, fields: [{ id: 2, tableId: 2, name: 'id', type: 'uuid', isPrimaryKey: true, isForeignKey: false, order: 0 }] },
+        {
+          id: 3,
+          sessionId: 1,
+          name: 'MovieGenre',
+          positionX: 0,
+          positionY: 0,
+          createdAt: '2026-01-01 00:00:00',
+          roleOverride: null,
+          fields: [
+            { id: 3, tableId: 3, name: 'movie_id', type: 'uuid', isPrimaryKey: false, isForeignKey: true, order: 0 },
+            { id: 4, tableId: 3, name: 'genre_id', type: 'uuid', isPrimaryKey: false, isForeignKey: true, order: 1 },
+          ],
+        },
+      ],
+      relationships: [
+        { id: 1, sessionId: 1, fromFieldId: 1, toFieldId: 3, cardinality: 'one-to-many', aiComment: 'A movie can have many genres' },
+        { id: 2, sessionId: 1, fromFieldId: 2, toFieldId: 4, cardinality: 'one-to-many', aiComment: 'A genre applies to many movies' },
+      ],
+    }
+    const edges = schemaToTableEdges(movieGenreSchema)
+    expect(edges).toHaveLength(2)
+    expect(edges.every((e) => (e.data as { cardinality: Cardinality }).cardinality === 'one-to-many')).toBe(true)
+    const targets = edges.map((e) => e.target).sort()
+    expect(targets).toEqual(['3', '3'])
+  })
 })
 
 describe('schemaToNodesWithReuse', () => {
@@ -183,10 +218,10 @@ describe('schemaToNodesWithReuse', () => {
 
   it('invalidates a table whose relationship summary text changes because the *other* table was renamed', () => {
     // orders' own row is untouched — only users' name changes, which feeds into orders' computed
-    // summaryLines ("one-to-many relationship with users" -> "...with People"). If invalidation
-    // only compared a table's own row, orders would incorrectly keep showing the stale text.
+    // summaryLines ("**orders** ↔ **users**" -> "...↔ **People**"). If invalidation only compared
+    // a table's own row, orders would incorrectly keep showing the stale text.
     const first = schemaToNodesWithReuse(schemaNoComment, new Map(), baseExtras)
-    expect(first[1].data.summaryLines).toEqual(['one-to-many relationship with users'])
+    expect(first[1].data.summaryLines).toEqual(['**orders** ↔ **users** (one-to-many)'])
 
     const renamed: FullSchema = {
       ...schemaNoComment,
@@ -195,7 +230,7 @@ describe('schemaToNodesWithReuse', () => {
     const second = schemaToNodesWithReuse(renamed, toMap(first), baseExtras)
 
     expect(second[1]).not.toBe(first[1])
-    expect(second[1].data.summaryLines).toEqual(['one-to-many relationship with People'])
+    expect(second[1].data.summaryLines).toEqual(['**orders** ↔ **People** (one-to-many)'])
   })
 
   it('treats a changed handler reference as a change, for every table', () => {

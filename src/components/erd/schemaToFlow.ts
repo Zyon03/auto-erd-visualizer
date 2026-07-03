@@ -152,7 +152,11 @@ export function schemaToEdges(schema: FullSchema): Edge[] {
 }
 
 /** Collapses field-to-field relationships onto a single edge per table pair — the "logical"
- *  ERD view (one line per table relationship) instead of the "physical" field-level view. */
+ *  ERD view (one line per table relationship) instead of the "physical" field-level view. A
+ *  many-to-many implemented via a join table still shows as two literal one-to-many lines into
+ *  that table here, on purpose: this app's whole point is producing a schema that translates to a
+ *  real system, and the join table is not optional in that schema, so relation view shouldn't
+ *  visually suggest otherwise by hiding it behind a single synthesized line. */
 export function schemaToTableEdges(schema: FullSchema): Edge[] {
   const fieldTableId = buildFieldTableId(schema)
   const grouped = new Map<

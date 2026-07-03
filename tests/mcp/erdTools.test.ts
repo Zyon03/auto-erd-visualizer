@@ -47,7 +47,7 @@ describe('createErdTools', () => {
       cardinality: 'one-to-many',
       aiComment: 'A user has many orders',
     })
-    expect(result.summary).toBe('Linked fields with a one-to-many relationship')
+    expect(result.summary).toBe('Linked `users.id` → `orders.user_id` (one-to-many)')
   })
 
   it('gets the full schema', () => {

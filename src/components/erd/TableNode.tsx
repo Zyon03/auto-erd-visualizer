@@ -17,8 +17,68 @@ import { Dialog, DialogTrigger, DialogContent, DialogTitle, DialogDescription } 
 import { FieldTypeSelect } from './FieldTypeSelect'
 import { TableRoleSelect } from './TableRoleSelect'
 import { TableRoleBadge } from './TableRoleBadge'
+import { parseFieldType, formatFieldType, TYPES_WITH_LENGTH, TYPES_WITH_PRECISION } from './fieldTypeParams'
 import { cn } from '../../lib/cn'
 import type { TableRole } from '../../mutations/tableRole'
+
+const paramInputClass =
+  'w-6 rounded border border-transparent bg-transparent px-0.5 py-0.5 text-center font-mono text-[10px] text-ink-faint outline-none hover:border-line hover:bg-inset focus-visible:border-accent focus-visible:text-ink'
+
+/** Length/precision editing for a field's type, e.g. the "255" in varchar(255) or the "10,2" in
+ *  decimal(10,2) -- shown next to the type dropdown, independent of whether that dropdown is
+ *  currently open for editing, since it's just adjusting a number rather than picking a new base
+ *  type. Only rendered for types where a length/precision is real (see fieldTypeParams.ts);
+ *  digits are constrained on input rather than validated after the fact, since there's no
+ *  meaningful "invalid but not yet complete" state to show an error for here. */
+function FieldTypeParams({ type, onChange }: { type: string; onChange: (next: string) => void }) {
+  const { base, params } = parseFieldType(type)
+
+  function setParam(index: number, raw: string) {
+    const digits = raw.replace(/\D/g, '')
+    const next = [...params]
+    next[index] = digits
+    onChange(formatFieldType(base, next))
+  }
+
+  if (TYPES_WITH_LENGTH.includes(base)) {
+    return (
+      <input
+        value={params[0] ?? ''}
+        onChange={(e) => setParam(0, e.target.value)}
+        placeholder="len"
+        inputMode="numeric"
+        title="Length"
+        className={paramInputClass}
+      />
+    )
+  }
+
+  if (TYPES_WITH_PRECISION.includes(base)) {
+    return (
+      <span className="flex items-center gap-0.5 font-mono text-[10px] text-ink-faint">
+        <input
+          value={params[0] ?? ''}
+          onChange={(e) => setParam(0, e.target.value)}
+          placeholder="p"
+          inputMode="numeric"
+          title="Precision"
+          className={paramInputClass}
+        />
+        ,
+        <input
+          value={params[1] ?? ''}
+          onChange={(e) => setParam(1, e.target.value)}
+          placeholder="s"
+          inputMode="numeric"
+          title="Scale"
+          className={paramInputClass}
+        />
+      </span>
+    )
+  }
+
+  return null
+}
 
 export interface TableNodeField {
   id: number
@@ -65,6 +125,19 @@ export type TableNodeType = Node<TableNodeData, 'table'>
 export const TABLE_HANDLE_SLOTS = 4
 const TABLE_HANDLE_TOP_PERCENTS = ['20%', '40%', '60%', '80%']
 
+const BOLD_SEGMENT = /(\*\*[^*]+\*\*)/g
+
+/** summarize.ts formats each line as `**Table** ↔ **Table** — comment (cardinality)` -- this is
+ *  the one place that markup gets interpreted. Deliberately not a full markdown renderer (this is
+ *  the only syntax that's ever generated): a plain split/wrap keeps this dialog free of any
+ *  content-injection surface from AI-authored text, since it only ever produces React elements,
+ *  never raw HTML. */
+function renderBoldedLine(line: string) {
+  return line.split(BOLD_SEGMENT).map((part, i) =>
+    part.startsWith('**') && part.endsWith('**') ? <strong key={i}>{part.slice(2, -2)}</strong> : part,
+  )
+}
+
 function AddFieldRow({ tableId, onAdd }: { tableId: number; onAdd: (tableId: number, name: string, type: string) => void }) {
   const [adding, setAdding] = useState(false)
   const [name, setName] = useState('')
@@ -98,6 +171,7 @@ function AddFieldRow({ tableId, onAdd }: { tableId: number; onAdd: (tableId: num
         className="w-20 rounded border border-accent bg-inset px-1.5 py-1 text-xs text-ink outline-none"
       />
       <FieldTypeSelect value={type} onChange={setType} />
+      <FieldTypeParams type={type} onChange={setType} />
       <button onClick={commit} className="text-xs text-accent hover:text-accent-strong">
         add
       </button>
@@ -133,8 +207,13 @@ function FieldRow({
 
   return (
     <tr ref={rowRef} className="group text-ink-muted">
-      <Handle type="target" id={`field-${field.id}`} position={Position.Left} style={handleStyle} />
       <td className="w-10 px-2 py-1">
+        {/* <Handle> renders a plain <div> -- only valid as a <td>/<th> child, never a <tr>
+            child directly (the browser's HTML parser silently relocates it otherwise, causing
+            a hydration mismatch). It's absolutely positioned relative to TableNode's outer
+            `relative` div regardless of which <td> it sits in, so nesting it here instead of
+            at the row level doesn't move it on screen. */}
+        <Handle type="target" id={`field-${field.id}`} position={Position.Left} style={handleStyle} />
         {field.isPrimaryKey && (
           <span className="inline-flex items-center gap-0.5 font-mono text-[9px] font-medium text-amber">
             <span className="h-1.5 w-1.5 rounded-full bg-amber" aria-hidden />
@@ -156,23 +235,28 @@ function FieldRow({
         />
       </td>
       <td className="px-2 py-1">
-        {editingType ? (
-          <FieldTypeSelect
-            value={field.type}
-            onChange={(next) => {
-              onUpdateFieldType?.(field.id, next)
-              setEditingType(false)
-            }}
-          />
-        ) : (
-          <button
-            onClick={() => setEditingType(true)}
-            className="rounded border border-transparent px-1.5 py-0.5 font-mono text-[11px] text-ink-faint hover:border-line hover:bg-inset hover:text-ink-muted"
-            title="Click to change type"
-          >
-            {field.type}
-          </button>
-        )}
+        <div className="flex items-center gap-1">
+          {editingType ? (
+            <FieldTypeSelect
+              value={field.type}
+              onChange={(next) => {
+                onUpdateFieldType?.(field.id, next)
+                setEditingType(false)
+              }}
+            />
+          ) : (
+            <button
+              onClick={() => setEditingType(true)}
+              className="rounded border border-transparent px-1.5 py-0.5 font-mono text-[11px] text-ink-faint hover:border-line hover:bg-inset hover:text-ink-muted"
+              title="Click to change type"
+            >
+              {parseFieldType(field.type).base}
+            </button>
+          )}
+          {/* Independent of editingType -- adjusting a length/precision is a different action
+              from picking a new base type, and shouldn't require opening the type dropdown. */}
+          <FieldTypeParams type={field.type} onChange={(next) => onUpdateFieldType?.(field.id, next)} />
+        </div>
       </td>
       <td className="w-5 px-1 py-1">
         <button
@@ -182,8 +266,8 @@ function FieldRow({
         >
           <Trash2 size={12} />
         </button>
+        <Handle type="source" id={`field-${field.id}`} position={Position.Right} style={handleStyle} />
       </td>
-      <Handle type="source" id={`field-${field.id}`} position={Position.Right} style={handleStyle} />
     </tr>
   )
 }
@@ -223,23 +307,21 @@ export function TableNode({ data, selected }: NodeProps<TableNodeType>) {
             : 'border-line',
       )}
     >
-      {/* Stable per-table handles, independent of field rows — used by the relation view,
-          which draws one edge per table pair instead of tracing to a specific field. Spread
-          across several slots (not header-flex children, so percentage `top` is relative to
-          the whole card) so multiple relationships don't all converge on one point. */}
+      {/* Stable per-table handles, independent of field rows — used by the relation view, which
+          draws one edge per table pair instead of tracing to a specific field. Spread across
+          several slots (not header-flex children, so percentage `top` is relative to the whole
+          card) so multiple relationships don't all converge on one point. Always invisible and
+          non-interactive: they're purely anchor points for the aggregated edges to attach to
+          (react-flow measures a Handle's DOM position regardless of its own opacity/pointer-events),
+          never meant to be seen or dragged from — relation view is a read-only overview, not
+          another place to hand-draw a connection. */}
       {TABLE_HANDLE_TOP_PERCENTS.map((top, slot) => (
         <Handle
           key={`target-${slot}`}
           type="target"
           id={`table-${data.tableId}-${slot}`}
           position={Position.Left}
-          style={{
-            top,
-            background: 'var(--color-accent)',
-            border: '1px solid var(--color-canvas)',
-            opacity: data.hideFieldHandles ? 1 : 0,
-            pointerEvents: data.hideFieldHandles ? undefined : 'none',
-          }}
+          style={{ top, opacity: 0, pointerEvents: 'none' }}
         />
       ))}
       {TABLE_HANDLE_TOP_PERCENTS.map((top, slot) => (
@@ -248,13 +330,7 @@ export function TableNode({ data, selected }: NodeProps<TableNodeType>) {
           type="source"
           id={`table-${data.tableId}-${slot}`}
           position={Position.Right}
-          style={{
-            top,
-            background: 'var(--color-accent)',
-            border: '1px solid var(--color-canvas)',
-            opacity: data.hideFieldHandles ? 1 : 0,
-            pointerEvents: data.hideFieldHandles ? undefined : 'none',
-          }}
+          style={{ top, opacity: 0, pointerEvents: 'none' }}
         />
       ))}
       <div className="group flex items-center justify-between rounded-t-lg bg-surface-raised px-3 py-1.5 font-display font-semibold text-ink">
@@ -297,7 +373,7 @@ export function TableNode({ data, selected }: NodeProps<TableNodeType>) {
               {data.summaryLines && data.summaryLines.length > 0 ? (
                 <ul className="mt-3 list-disc space-y-1.5 pl-4 text-sm text-ink">
                   {data.summaryLines.map((line, i) => (
-                    <li key={i}>{line}</li>
+                    <li key={i}>{renderBoldedLine(line)}</li>
                   ))}
                 </ul>
               ) : (
