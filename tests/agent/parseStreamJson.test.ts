@@ -28,9 +28,34 @@ describe('createStreamJsonParser', () => {
       message: { content: [{ tool_use_id: 'toolu_2', type: 'tool_result', content: [{ type: 'text', text: 'Added table ping_test with id 7' }] }] },
     })
 
-    expect(parser.parseLine(toolUseLine)).toEqual([])
+    expect(parser.parseLine(toolUseLine)).toEqual([{ kind: 'tool_call_started', toolName: 'add_table' }])
     expect(parser.parseLine(toolResultLine)).toEqual([
       { kind: 'tool_step', toolName: 'add_table', stepText: 'Added table ping_test with id 7' },
+    ])
+  })
+
+  it('replaces get_schema\'s result with a fixed short step text instead of the raw schema JSON', () => {
+    const parser = createStreamJsonParser()
+    const toolUseLine = JSON.stringify({
+      type: 'assistant',
+      message: { content: [{ type: 'tool_use', id: 'toolu_6', name: 'mcp__erd__get_schema', input: {} }] },
+    })
+    const toolResultLine = JSON.stringify({
+      type: 'user',
+      message: {
+        content: [
+          {
+            tool_use_id: 'toolu_6',
+            type: 'tool_result',
+            content: [{ type: 'text', text: JSON.stringify({ tables: [{ id: 1, name: 'users', fields: [] }] }) }],
+          },
+        ],
+      },
+    })
+
+    expect(parser.parseLine(toolUseLine)).toEqual([{ kind: 'tool_call_started', toolName: 'get_schema' }])
+    expect(parser.parseLine(toolResultLine)).toEqual([
+      { kind: 'tool_step', toolName: 'get_schema', stepText: 'Checked the current schema' },
     ])
   })
 

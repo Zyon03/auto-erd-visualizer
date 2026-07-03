@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useReactFlow } from '@xyflow/react'
-import { Download, MoreHorizontal, Rows3, Scan, Trash2, Wand2, Waypoints } from 'lucide-react'
+import { Download, Loader2, MoreHorizontal, Rows3, Scan, Trash2, Wand2, Waypoints } from 'lucide-react'
 import { EditableText } from '../ui/editable-text'
 import { Button } from '../ui/button'
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '../ui/dropdown-menu'
@@ -24,7 +24,7 @@ export interface SessionTopbarProps {
   hasTables: boolean
   canAutoOrganize: boolean
   onAutoOrganize: () => Promise<void>
-  onExport: () => void
+  onExport: () => Promise<void>
   onDeleteSession: () => Promise<void>
 }
 
@@ -45,14 +45,30 @@ export function SessionTopbar({
 }: SessionTopbarProps) {
   const { fitView } = useReactFlow()
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false)
+  const [organizing, setOrganizing] = useState(false)
+  const [exporting, setExporting] = useState(false)
 
   async function handleAutoOrganizeClick() {
-    await onAutoOrganize()
-    fitView({ duration: 300 })
+    setOrganizing(true)
+    try {
+      await onAutoOrganize()
+      fitView({ duration: 300 })
+    } finally {
+      setOrganizing(false)
+    }
   }
 
   function handleFitViewClick() {
     fitView({ duration: 300 })
+  }
+
+  async function handleExportClick() {
+    setExporting(true)
+    try {
+      await onExport()
+    } finally {
+      setExporting(false)
+    }
   }
 
   return (
@@ -97,9 +113,10 @@ export function SessionTopbar({
           variant="outline"
           size="sm"
           disabled={!canAutoOrganize}
+          loading={organizing}
           title="Reflow tables by how they're connected via relationships"
         >
-          <Wand2 size={13} />
+          {organizing ? null : <Wand2 size={13} />}
           Auto organize
         </Button>
         <DropdownMenu>
@@ -112,8 +129,14 @@ export function SessionTopbar({
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent>
-            <DropdownMenuItem onSelect={onExport}>
-              <Download size={14} />
+            <DropdownMenuItem
+              onSelect={(e) => {
+                e.preventDefault()
+                handleExportClick()
+              }}
+              disabled={exporting}
+            >
+              {exporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
               Export SQL
             </DropdownMenuItem>
             <DropdownMenuItem

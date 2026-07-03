@@ -1,4 +1,5 @@
 export type ParsedEvent =
+  | { kind: 'tool_call_started'; toolName: string }
   | { kind: 'tool_step'; toolName: string; stepText: string }
   | { kind: 'assistant_text'; text: string }
   | { kind: 'ask_question'; question: string; choices: string[]; allowMultiple: boolean }
@@ -46,6 +47,7 @@ export function createStreamJsonParser() {
                 if (question) events.push({ kind: 'ask_question', question, choices, allowMultiple })
               } else {
                 pendingToolNames.set(block.id, toolName)
+                events.push({ kind: 'tool_call_started', toolName })
               }
             }
           } else if (block.type === 'text' && typeof block.text === 'string') {
@@ -63,6 +65,15 @@ export function createStreamJsonParser() {
             const toolName = pendingToolNames.get(block.tool_use_id)
             if (!toolName) continue
             pendingToolNames.delete(block.tool_use_id)
+
+            // get_schema's real MCP result is the full schema JSON -- the AI needs that to see
+            // current state, but every other tool's result is already a short human-readable
+            // summary (see mcp/server.ts), so this is the one case where echoing the raw result
+            // text as the step line would dump an enormous JSON blob into the chat log instead.
+            if (toolName === 'get_schema') {
+              events.push({ kind: 'tool_step', toolName, stepText: 'Checked the current schema' })
+              continue
+            }
 
             const resultContent = block.content
             const stepText = Array.isArray(resultContent)

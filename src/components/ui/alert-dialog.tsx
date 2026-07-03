@@ -8,10 +8,10 @@ export const AlertDialogTrigger = RadixAlertDialog.Trigger
 export function AlertDialogContent({ className, ...props }: RadixAlertDialog.AlertDialogContentProps) {
   return (
     <RadixAlertDialog.Portal>
-      <RadixAlertDialog.Overlay className="fixed inset-0 z-40 bg-canvas/70 backdrop-blur-[2px]" />
+      <RadixAlertDialog.Overlay className="fixed inset-0 z-40 bg-canvas/70 backdrop-blur-[2px] data-[state=open]:animate-[fade-in_150ms_ease-out]" />
       <RadixAlertDialog.Content
         className={cn(
-          'fixed left-1/2 top-1/2 z-50 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-lg border border-line bg-surface-raised p-5 shadow-2xl focus:outline-none',
+          'fixed left-1/2 top-1/2 z-50 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-lg border border-line bg-surface-raised p-5 shadow-2xl focus:outline-none data-[state=open]:animate-[fade-in_150ms_ease-out]',
           className,
         )}
         {...props}

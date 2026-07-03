@@ -1,18 +1,31 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useServerFn } from '@tanstack/react-start'
-import { Send, Square, ChevronDown, ChevronUp, Maximize2, Minimize2, PanelBottomClose } from 'lucide-react'
-import { sendMessageFn, cancelTurnFn } from '../../server-fns/chat'
+import {
+  Send,
+  Square,
+  ChevronDown,
+  ChevronUp,
+  Maximize2,
+  Minimize2,
+  PanelBottomClose,
+  Eye,
+  EyeOff,
+} from 'lucide-react'
+import { toast } from 'sonner'
+import { sendMessageFn, cancelTurnFn, loadEarlierChatMessagesFn } from '../../server-fns/chat'
 import { useSessionEvents } from '../../hooks/useSessionEvents'
 import { ChatMessageBubble } from './ChatMessageBubble'
 import { Button } from '../ui/button'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../ui/select'
 import { MODEL_OPTIONS } from '../../agent/models'
 import { encodeQuestion } from '../../agent/questionMessage'
-import { encodeAgentError } from '../../agent/agentErrorMessage'
+import { encodeAgentError, decodeAgentError } from '../../agent/agentErrorMessage'
 import type { AgentErrorKind } from '../../agent/classifyAgentError'
 import type { ChatMessage } from '../../mutations/chatMessages'
+import { cn } from '../../lib/cn'
 
 type TurnEvent =
+  | { type: 'tool_call_started'; toolName: string }
   | { type: 'tool_step'; toolName: string; stepText: string }
   | { type: 'assistant_note'; text: string }
   | { type: 'ask_question'; question: string; choices: string[]; allowMultiple: boolean }
@@ -22,10 +35,36 @@ type TurnEvent =
 type ChatMode = 'expanded' | 'full' | 'compact' | 'hidden'
 
 const DEFAULT_MODEL_VALUE = 'default'
+const ACTIVITY_LOG_STORAGE_KEY = 'autoerd:chat-show-activity-log'
+
+// Friendly present-progressive labels for the live "AI is doing X right now" indicator, shown
+// the instant a tool call starts (before its result — and thus its actual outcome — is known).
+// Falls back to a generic label built from the raw tool name for anything not listed here, so a
+// newly added erd tool degrades gracefully instead of showing nothing.
+const TOOL_ACTION_LABELS: Record<string, string> = {
+  get_schema: 'Checking the schema…',
+  add_table: 'Adding a table…',
+  rename_table: 'Renaming a table…',
+  delete_table: 'Deleting a table…',
+  add_field: 'Adding a field…',
+  rename_field: 'Renaming a field…',
+  update_field: 'Updating a field…',
+  delete_field: 'Deleting a field…',
+  add_relationship: 'Adding a relationship…',
+  update_relationship: 'Updating a relationship…',
+  delete_relationship: 'Deleting a relationship…',
+}
+
+function toolActionLabel(toolName: string): string {
+  return TOOL_ACTION_LABELS[toolName] ?? `Running ${toolName.replace(/_/g, ' ')}…`
+}
 
 export interface ChatPanelProps {
   sessionId: number
   initialMessages: ChatMessage[]
+  /** Whether the initial page (server-fns/chat.ts's CHAT_PAGE_SIZE most recent messages) left
+   *  older ones unloaded — see docs/superpowers/plans/2026-07-03-chat-message-pagination.md. */
+  initialHasMoreOlderMessages: boolean
   onSchemaMayHaveChanged: () => void
   model: string | null
   onModelChange: (model: string) => void
@@ -38,22 +77,57 @@ export interface ChatPanelProps {
 export function ChatPanel({
   sessionId,
   initialMessages,
+  initialHasMoreOlderMessages,
   onSchemaMayHaveChanged,
   model,
   onModelChange,
   hasTables,
 }: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages)
+  const [hasMoreOlder, setHasMoreOlder] = useState(initialHasMoreOlderMessages)
+  const [loadingOlder, setLoadingOlder] = useState(false)
   const [draft, setDraft] = useState('')
   const [turnInFlight, setTurnInFlight] = useState(false)
   const [workingNote, setWorkingNote] = useState<string | null>(null)
   const [chatMode, setChatMode] = useState<ChatMode>('full')
+  // Tool-step system messages ("Added table `users`", etc.) are the AI's own action log, not
+  // conversation -- hidden by default so the chat reads as a dialogue with the user's own
+  // messages and the AI's replies, with the play-by-play tucked behind a toggle. Agent-error
+  // messages are a different kind of system message (user-facing problem reports) and always
+  // stay visible regardless of this toggle -- see visibleMessages below.
+  const [showActivityLog, setShowActivityLog] = useState(false)
   const nextLocalId = useRef(-1)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
+  // Set right before prepending an older page, to the container's scrollHeight *before* the
+  // prepend — the scroll-pinning layout effect below uses it to keep whatever the user was
+  // looking at in the same visual spot, instead of either jumping to the bottom (its normal
+  // behavior for a *new* message) or leaving scrollTop at a now-wrong pixel offset into the
+  // newly-added older content.
+  const pendingScrollAdjustRef = useRef<number | null>(null)
 
   useEffect(() => {
     setMessages(initialMessages)
   }, [sessionId])
+
+  useEffect(() => {
+    setShowActivityLog(localStorage.getItem(ACTIVITY_LOG_STORAGE_KEY) === '1')
+  }, [])
+
+  function toggleActivityLog() {
+    setShowActivityLog((prev) => {
+      const next = !prev
+      localStorage.setItem(ACTIVITY_LOG_STORAGE_KEY, next ? '1' : '0')
+      return next
+    })
+  }
+
+  // Plain tool-step logs are filtered out when the activity log is collapsed; agent-error
+  // messages (decodable system messages) are a user-facing problem report, not an action log
+  // entry, so they stay visible either way.
+  const visibleMessages = useMemo(
+    () => (showActivityLog ? messages : messages.filter((m) => m.role !== 'system' || decodeAgentError(m.content) !== null)),
+    [messages, showActivityLog],
+  )
 
   // Message history opens on the most recent message, not the oldest — the scrollable region is
   // remounted whenever chatMode toggles away from 'full' and back (see the conditional render
@@ -63,15 +137,36 @@ export function ChatPanel({
   useLayoutEffect(() => {
     const el = scrollContainerRef.current
     if (!el) return
-    el.scrollTop = el.scrollHeight
-  }, [messages, chatMode])
+
+    if (pendingScrollAdjustRef.current !== null) {
+      const previousScrollHeight = pendingScrollAdjustRef.current
+      pendingScrollAdjustRef.current = null
+      el.scrollTop += el.scrollHeight - previousScrollHeight
+      return
+    }
+
+    function pinToBottom() {
+      if (el) el.scrollTop = el.scrollHeight
+    }
+    pinToBottom()
+    // Same fix as TableNode's handle-position measurement: the app's webfonts swap in after
+    // first paint and reflow already-rendered text, changing its height. A short history barely
+    // moves; a long one (hundreds of wrapped lines, e.g. many AI tool-step log lines) can shift
+    // enough that scrollHeight measured before the swap lands well short of the true bottom —
+    // this re-measures once the swap actually happens, so a long session doesn't open somewhere
+    // in the middle of its history instead of the end.
+    document.fonts?.ready.then(pinToBottom)
+  }, [visibleMessages, chatMode])
 
   const sendMessage = useServerFn(sendMessageFn)
   const cancelTurn = useServerFn(cancelTurnFn)
+  const loadEarlierMessages = useServerFn(loadEarlierChatMessagesFn)
 
   const eventsStatus = useSessionEvents(sessionId, (raw) => {
     const event = raw as TurnEvent
-    if (event.type === 'tool_step') {
+    if (event.type === 'tool_call_started') {
+      setWorkingNote(toolActionLabel(event.toolName))
+    } else if (event.type === 'tool_step') {
       setWorkingNote(null)
       setMessages((prev) => [
         ...prev,
@@ -134,6 +229,22 @@ export function ChatPanel({
 
   function handleAnswerQuestion(text: string) {
     handleSend(text)
+  }
+
+  async function handleLoadEarlier() {
+    if (loadingOlder || !hasMoreOlder || messages.length === 0) return
+    setLoadingOlder(true)
+    pendingScrollAdjustRef.current = scrollContainerRef.current?.scrollHeight ?? null
+    try {
+      const page = await loadEarlierMessages({ data: { sessionId, beforeId: messages[0].id } })
+      setHasMoreOlder(page.hasMore)
+      setMessages((prev) => [...page.messages, ...prev])
+    } catch {
+      pendingScrollAdjustRef.current = null
+      toast.error('Could not load earlier messages')
+    } finally {
+      setLoadingOlder(false)
+    }
   }
 
   function handleStop() {
@@ -231,6 +342,16 @@ export function ChatPanel({
           {modelSelect}
           <div className="flex items-center gap-0.5">
             <button
+              onClick={toggleActivityLog}
+              className={cn(
+                'rounded p-1 text-ink-faint hover:bg-surface-raised hover:text-ink',
+                showActivityLog && 'text-accent hover:text-accent',
+              )}
+              title={showActivityLog ? 'Hide activity log (table/field edits)' : 'Show activity log (table/field edits)'}
+            >
+              {showActivityLog ? <Eye size={13} /> : <EyeOff size={13} />}
+            </button>
+            <button
               onClick={() => setChatMode(isHistoryVisible ? 'compact' : 'full')}
               className="rounded p-1 text-ink-faint hover:bg-surface-raised hover:text-ink"
               title={isHistoryVisible ? 'Hide message history' : 'Show message history'}
@@ -258,14 +379,30 @@ export function ChatPanel({
             ref={scrollContainerRef}
             className={`space-y-2 overflow-y-auto px-3 pt-3 [mask-image:linear-gradient(to_bottom,transparent,black_16px)] ${isExpanded ? 'max-h-[70vh]' : 'max-h-64'}`}
           >
-            {messages.map((message, index) => (
-              <ChatMessageBubble
-                key={message.id}
-                message={message}
-                interactive={index === messages.length - 1}
-                disabled={turnInFlight}
-                onAnswerQuestion={handleAnswerQuestion}
-              />
+            {hasMoreOlder && (
+              <div className="flex justify-center pb-1">
+                <button
+                  onClick={handleLoadEarlier}
+                  disabled={loadingOlder}
+                  className="rounded-full border border-line px-2.5 py-1 text-xs text-ink-muted hover:border-line-strong hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {loadingOlder ? 'Loading…' : 'Load earlier messages'}
+                </button>
+              </div>
+            )}
+            {visibleMessages.map((message, index) => (
+              // The animation only plays once, on this element's first mount — existing messages
+              // keep their stable `message.id` key across re-renders (e.g. a new message arriving
+              // appends to the array rather than remounting the list), so only a genuinely new
+              // message ever animates in.
+              <div key={message.id} className="animate-[fade-in-up_200ms_ease-out]">
+                <ChatMessageBubble
+                  message={message}
+                  interactive={index === visibleMessages.length - 1}
+                  disabled={turnInFlight}
+                  onAnswerQuestion={handleAnswerQuestion}
+                />
+              </div>
             ))}
           </div>
         )}

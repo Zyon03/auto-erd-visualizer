@@ -3,10 +3,15 @@ import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools'
 import { TanStackDevtools } from '@tanstack/react-devtools'
 import { Toaster } from 'sonner'
 import { SessionSidebar } from '../components/sidebar/SessionSidebar'
+import { RouteLoadingScreen } from '../components/RouteLoadingScreen'
 
 import appCss from '../styles.css?url'
 
 export const Route = createRootRoute({
+  // Falls through to any nested route (e.g. /sessions/$sessionId) that doesn't define its own
+  // pendingComponent — right now that's all of them, so this is the one loading screen for every
+  // route's loader.
+  pendingComponent: RouteLoadingScreen,
   head: () => ({
     meta: [
       {

@@ -3,6 +3,7 @@ import { useServerFn } from '@tanstack/react-start'
 import { Plus } from 'lucide-react'
 import { createSessionFn } from '../server-fns/sessions'
 import { Button } from '../components/ui/button'
+import { notifySessionsChanged } from '../lib/sessionListBus'
 
 export const Route = createFileRoute('/')({
   component: Dashboard,
@@ -14,6 +15,7 @@ function Dashboard() {
 
   async function handleCreate() {
     const session = await createSession({ data: { name: 'Session 1' } })
+    notifySessionsChanged()
     navigate({ to: '/sessions/$sessionId', params: { sessionId: String(session.id) } })
   }
 

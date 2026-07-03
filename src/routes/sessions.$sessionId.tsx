@@ -35,12 +35,18 @@ const DEFAULT_MODEL_VALUE = 'default'
 export const Route = createFileRoute('/sessions/$sessionId')({
   loader: async ({ params }) => {
     const sessionId = Number(params.sessionId)
-    const [schema, messages, session] = await Promise.all([
+    const [schema, messagePage, session] = await Promise.all([
       getFullSchemaFn({ data: { sessionId } }),
       listChatMessagesFn({ data: { sessionId } }),
       getSessionFn({ data: { sessionId } }),
     ])
-    return { schema, messages, model: session?.model ?? null, name: session?.name ?? 'Untitled session' }
+    return {
+      schema,
+      messages: messagePage.messages,
+      hasMoreOlderMessages: messagePage.hasMore,
+      model: session?.model ?? null,
+      name: session?.name ?? 'Untitled session',
+    }
   },
   component: SessionView,
 })
@@ -54,6 +60,7 @@ function SessionView() {
       sessionId={Number(sessionId)}
       initialSchema={initialData.schema}
       initialMessages={initialData.messages}
+      initialHasMoreOlderMessages={initialData.hasMoreOlderMessages}
       initialModel={initialData.model}
       initialName={initialData.name}
     />
@@ -64,12 +71,14 @@ function SessionContent({
   sessionId,
   initialSchema,
   initialMessages,
+  initialHasMoreOlderMessages,
   initialModel,
   initialName,
 }: {
   sessionId: number
   initialSchema: FullSchema
   initialMessages: ChatMessage[]
+  initialHasMoreOlderMessages: boolean
   initialModel: string | null
   initialName: string
 }) {
@@ -325,6 +334,7 @@ function SessionContent({
           <ChatPanel
             sessionId={sessionId}
             initialMessages={initialMessages}
+            initialHasMoreOlderMessages={initialHasMoreOlderMessages}
             onSchemaMayHaveChanged={refetch}
             model={model}
             onModelChange={handleModelChange}

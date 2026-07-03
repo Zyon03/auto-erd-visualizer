@@ -36,7 +36,7 @@ export interface ErdCanvasProps {
    *  Fields/Relations toggle lives outside this component now, as a sibling under the shared
    *  <ReactFlowProvider>, so both need to read/drive the same value. */
   viewMode: ViewMode
-  onAddTable: (name: string) => void
+  onAddTable: (name: string) => Promise<void>
   onAddField: (tableId: number, name: string, type: string) => void
   onConnect: (fromFieldId: number, toFieldId: number) => void
   onRenameTable: (tableId: number, name: string) => void
@@ -76,6 +76,7 @@ export function ErdCanvas({
   onSetTableRole,
 }: ErdCanvasProps) {
   const [newTableName, setNewTableName] = useState('')
+  const [addingTable, setAddingTable] = useState(false)
   const [focusTarget, setFocusTarget] = useState<{ tableId: number; nonce: number } | null>(null)
   // Carries node objects across renders so schemaToNodesWithReuse can hand back the exact same
   // object for a table whose content didn't actually change — see that function's doc comment
@@ -170,10 +171,15 @@ export function ErdCanvas({
     setHoveredEdgeId(null)
   }
 
-  function handleAddTable() {
+  async function handleAddTable() {
     if (!newTableName.trim()) return
-    onAddTable(newTableName.trim())
-    setNewTableName('')
+    setAddingTable(true)
+    try {
+      await onAddTable(newTableName.trim())
+      setNewTableName('')
+    } finally {
+      setAddingTable(false)
+    }
   }
 
   function handleSelectTable(tableId: number) {
@@ -223,10 +229,11 @@ export function ErdCanvas({
             onChange={(e) => setNewTableName(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleAddTable()}
             placeholder="New table name"
-            className="rounded border border-line bg-surface px-2 py-1 text-sm text-ink placeholder:text-ink-faint outline-none focus-visible:border-accent"
+            disabled={addingTable}
+            className="rounded border border-line bg-surface px-2 py-1 text-sm text-ink placeholder:text-ink-faint outline-none focus-visible:border-accent disabled:opacity-50"
           />
-          <Button onClick={handleAddTable} size="sm">
-            <Plus size={14} />
+          <Button onClick={handleAddTable} size="sm" loading={addingTable} disabled={!newTableName.trim()}>
+            {addingTable ? null : <Plus size={14} />}
             Add table
           </Button>
         </Panel>

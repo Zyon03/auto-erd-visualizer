@@ -27,7 +27,7 @@ export function SelectContent({ className, children, ...props }: RadixSelect.Sel
     <RadixSelect.Portal>
       <RadixSelect.Content
         className={cn(
-          'z-50 max-h-64 overflow-hidden rounded-md border border-line bg-surface-raised text-ink shadow-2xl',
+          'z-50 max-h-64 overflow-hidden rounded-md border border-line bg-surface-raised text-ink shadow-2xl data-[state=open]:animate-[fade-in_120ms_ease-out]',
           className,
         )}
         position="popper"

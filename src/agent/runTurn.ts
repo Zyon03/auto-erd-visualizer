@@ -34,6 +34,13 @@ const SYSTEM_PROMPT =
   "varchar(255) for emails/URLs/general free text, varchar(100) for names or titles, varchar(50) for " +
   "codes/slugs/phone numbers, varchar(20) for short identifiers — adjust based on what the field actually " +
   "holds rather than defaulting to one number every time.\n\n" +
+  "Primary key type: default every primary key to a plain integer (auto-increment), not uuid. This isn't a " +
+  "scale decision — a bigint handles billions of rows fine, so don't pick uuid just because the system sounds " +
+  "big or has lots of users. Reach for uuid only for a concrete reason: the id gets exposed publicly (a URL, " +
+  "an API response) where guessing/enumerating other records' sequential ids would be a real problem, or the " +
+  "system needs multiple services or offline clients generating ids independently without a central sequence. " +
+  "Only ask_question about this when the user's own description already hints at one of those (public APIs, " +
+  "mobile offline sync, multi-region/multi-service) — don't make it a standing question for every session.\n\n" +
   "Table naming: unless the user asks for something else, prefix table names by role — `M_` for master/" +
   "reference data (relatively static lookup entities, e.g. M_User, M_Product, M_Category) and `T_` for " +
   "transactional data (records of events or activity, e.g. T_Order, T_Payment, T_LoginLog). If a table is a " +
@@ -76,6 +83,7 @@ const ALLOWED_TOOLS = [
 ].join(",");
 
 export type TurnEvent =
+  | { type: "tool_call_started"; toolName: string }
   | { type: "tool_step"; toolName: string; stepText: string }
   | { type: "assistant_note"; text: string }
   | { type: "ask_question"; question: string; choices: string[]; allowMultiple: boolean }
@@ -217,7 +225,11 @@ export function runTurn(
     if (checkSessionGone()) return;
 
     for (const evt of parser.parseLine(line)) {
-      if (evt.kind === "tool_step") {
+      if (evt.kind === "tool_call_started") {
+        // Transient, like assistant_note -- purely a "the AI is doing X right now" indicator,
+        // superseded by the tool_step event once the call actually finishes. Never persisted.
+        onEvent({ type: "tool_call_started", toolName: evt.toolName });
+      } else if (evt.kind === "tool_step") {
         addChatMessage(db, sessionId, "system", evt.stepText);
         onEvent({
           type: "tool_step",

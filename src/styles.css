@@ -82,6 +82,46 @@ pre code {
   outline-offset: 2px;
 }
 
+/* Browsers don't give <button> a pointer cursor by default (only <a> gets that) — every clickable
+   control in this app is a real <button> (including Radix trigger primitives, which render one
+   under the hood), so this one rule covers them instead of adding cursor-pointer at each call site. */
+button:not(:disabled) {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+/* A staggered three-dot pulse — the one deliberately "designed" loading moment (route
+   transitions), distinct from the plainer single-dot pulse already used for ambient
+   background-turn-in-progress state, and from the quiet spinner used on individual buttons. */
+@keyframes dot-pulse {
+  0%,
+  80%,
+  100% {
+    transform: scale(0.6);
+    opacity: 0.4;
+  }
+  40% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
 /* Faint dot grid used behind the ERD canvas — a quiet nod to a drafting table. */
 .dot-grid {
   background-image: radial-gradient(circle, var(--color-line) 1px, transparent 1px);
