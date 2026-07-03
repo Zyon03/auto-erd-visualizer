@@ -57,7 +57,7 @@ Answering — via a drawer choice pill, the multi-select Send button, the drawer
 Currently the status row only renders when `workingNote` is truthy, so there's a gap with **zero feedback** between hitting Send and the first SSE event arriving. Changes to `ChatPanel.tsx`:
 
 - The status row's render condition changes from `{workingNote && (...)}` to `{turnInFlight && (...)}`, with the label falling back to `"Thinking…"` when `workingNote` is `null`.
-- A small spinner (lucide `Loader2` with `animate-spin`) replaces the existing static pulsing dot in that row.
+- A small spinner (lucide `Loader2` with `animate-spin`) replaces that row's existing `animate-pulse` accent dot. (This is a separate element from the green/red SSE connection-status dot next to the input — that one is untouched.)
 - An `elapsedSeconds` counter starts at 0 the instant `turnInFlight` becomes `true` (a `setInterval` ticking once per second), resets to 0 on each new send, and stops when the turn ends. It runs continuously for the whole turn — not reset per step — so `"Thinking… 4s"` becomes `"Adding a table… 11s"` as the turn progresses, giving a true sense of total wait time.
 
 ## Component/File Changes
