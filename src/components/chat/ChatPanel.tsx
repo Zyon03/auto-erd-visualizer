@@ -105,6 +105,13 @@ export function ChatPanel({
   // stay visible regardless of this toggle -- see visibleMessages below.
   const [showActivityLog, setShowActivityLog] = useState(false)
   const nextLocalId = useRef(-1)
+  // Bumped every time turnInFlight changes for an authoritative reason (a real SSE event, or a
+  // new turn being sent) -- reconcile() below is async and can straddle one of those changes, so
+  // it captures this before its awaits and refuses to apply its own (by then stale) turnInFlight
+  // verdict if the version has since moved on. Without this, a slow reconcile response landing
+  // after the real turn_complete event already cleared turnInFlight would clobber it back to true
+  // with nothing left to ever clear it again.
+  const turnStateVersionRef = useRef(0)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   // Set right before prepending an older page, to the container's scrollHeight *before* the
   // prepend — the scroll-pinning layout effect below uses it to keep whatever the user was
@@ -195,17 +202,28 @@ export function ChatPanel({
   // id is superseded by its real DB row once persisted, so only those need dropping) and ask
   // whether a turn is genuinely still running for this session.
   async function reconcile() {
-    const page = await listRecentMessages({ data: { sessionId } })
-    setMessages((prev) => {
-      const byId = new Map(prev.filter((m) => m.id >= 0).map((m) => [m.id, m]))
-      for (const m of page.messages) byId.set(m.id, m)
-      return [...byId.values()].sort((a, b) => a.id - b.id)
-    })
-    setHasMoreOlder(page.hasMore)
+    const versionAtStart = turnStateVersionRef.current
+    try {
+      const [page, running] = await Promise.all([
+        listRecentMessages({ data: { sessionId } }),
+        checkTurnRunning({ data: { sessionId } }),
+      ])
+      setMessages((prev) => {
+        const byId = new Map(prev.filter((m) => m.id >= 0).map((m) => [m.id, m]))
+        for (const m of page.messages) byId.set(m.id, m)
+        return [...byId.values()].sort((a, b) => a.id - b.id)
+      })
+      setHasMoreOlder(page.hasMore)
 
-    const running = await checkTurnRunning({ data: { sessionId } })
-    setTurnInFlight(running)
-    if (!running) setWorkingNote(null)
+      // A real turn_complete/turn_error (or a freshly-sent message) already landed while this
+      // was in flight -- that's authoritative, so don't overwrite it with this now-stale verdict.
+      if (turnStateVersionRef.current !== versionAtStart) return
+      setTurnInFlight(running)
+      if (!running) setWorkingNote(null)
+    } catch {
+      // Transient failure reconciling (e.g. a flaky connection) -- leave state as-is, the next
+      // reconnect's onOpen will retry.
+    }
   }
 
   const eventsStatus = useSessionEvents(sessionId, (raw) => {
@@ -265,6 +283,7 @@ export function ChatPanel({
           },
         ])
       }
+      turnStateVersionRef.current++
       setTurnInFlight(false)
       onSchemaMayHaveChanged()
     } else if (event.type === 'turn_error') {
@@ -277,6 +296,7 @@ export function ChatPanel({
         ...prev,
         { id: nextLocalId.current--, sessionId, role: 'system', content, createdAt: '' },
       ])
+      turnStateVersionRef.current++
       setTurnInFlight(false)
     }
   }, reconcile)
@@ -285,6 +305,7 @@ export function ChatPanel({
     const content = (overrideText ?? draft).trim()
     if (!content || turnInFlight) return
     setDraft('')
+    turnStateVersionRef.current++
     setTurnInFlight(true)
     setWorkingNote(null)
     const message = await sendMessage({ data: { sessionId, content } })
