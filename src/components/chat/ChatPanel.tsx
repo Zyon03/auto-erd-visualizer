@@ -208,16 +208,22 @@ export function ChatPanel({
         listRecentMessages({ data: { sessionId } }),
         checkTurnRunning({ data: { sessionId } }),
       ])
+
+      // A live event (a new message added, a turn starting/finishing) already landed while this
+      // was in flight -- that event is strictly more current than this snapshot, which may
+      // predate whatever it just did (e.g. this fetch could have been dispatched before a
+      // just-arrived assistant reply was persisted). Discarding the whole result rather than
+      // merging it avoids the merge below wiping out that live-added message: it drops every
+      // not-yet-confirmed (negative id) message unconditionally, so applying a stale snapshot
+      // after a newer one arrived would delete it with nothing left to restore it.
+      if (turnStateVersionRef.current !== versionAtStart) return
+
       setMessages((prev) => {
         const byId = new Map(prev.filter((m) => m.id >= 0).map((m) => [m.id, m]))
         for (const m of page.messages) byId.set(m.id, m)
         return [...byId.values()].sort((a, b) => a.id - b.id)
       })
       setHasMoreOlder(page.hasMore)
-
-      // A real turn_complete/turn_error (or a freshly-sent message) already landed while this
-      // was in flight -- that's authoritative, so don't overwrite it with this now-stale verdict.
-      if (turnStateVersionRef.current !== versionAtStart) return
       setTurnInFlight(running)
       if (!running) setWorkingNote(null)
     } catch {
@@ -232,6 +238,7 @@ export function ChatPanel({
       setWorkingNote(toolActionLabel(event.toolName))
     } else if (event.type === 'tool_step') {
       setWorkingNote(null)
+      turnStateVersionRef.current++
       setMessages((prev) => [
         ...prev,
         { id: nextLocalId.current--, sessionId, role: 'system', content: event.stepText, createdAt: '' },
@@ -251,6 +258,7 @@ export function ChatPanel({
       // briefly, since pendingQuestion (see above) no longer depends on this being the last
       // message once turn_complete arrives.
       setWorkingNote(null)
+      turnStateVersionRef.current++
       setMessages((prev) => [
         ...prev,
         {
