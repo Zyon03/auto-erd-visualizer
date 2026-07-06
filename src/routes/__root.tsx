@@ -1,11 +1,11 @@
-import { HeadContent, Scripts, createRootRoute } from '@tanstack/react-router'
-import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools'
-import { TanStackDevtools } from '@tanstack/react-devtools'
-import { Toaster } from 'sonner'
-import { SessionSidebar } from '../components/sidebar/SessionSidebar'
-import { RouteLoadingScreen } from '../components/RouteLoadingScreen'
+import { HeadContent, Scripts, createRootRoute } from "@tanstack/react-router";
+import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
+import { TanStackDevtools } from "@tanstack/react-devtools";
+import { Toaster } from "sonner";
+import { SessionSidebar } from "../components/sidebar/SessionSidebar";
+import { RouteLoadingScreen } from "../components/RouteLoadingScreen";
 
-import appCss from '../styles.css?url'
+import appCss from "../styles.css?url";
 
 export const Route = createRootRoute({
   // Falls through to any nested route (e.g. /sessions/$sessionId) that doesn't define its own
@@ -15,29 +15,29 @@ export const Route = createRootRoute({
   head: () => ({
     meta: [
       {
-        charSet: 'utf-8',
+        charSet: "utf-8",
       },
       {
-        name: 'viewport',
-        content: 'width=device-width, initial-scale=1',
+        name: "viewport",
+        content: "width=device-width, initial-scale=1",
       },
       {
-        title: 'Auto ERD',
+        title: "ERDrew",
       },
     ],
     links: [
       {
-        rel: 'stylesheet',
+        rel: "stylesheet",
         href: appCss,
       },
     ],
   }),
   shellComponent: RootDocument,
-})
+});
 
 function RootDocument({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className="dark" style={{ colorScheme: 'dark' }}>
+    <html lang="en" className="dark" style={{ colorScheme: "dark" }}>
       <head>
         <HeadContent />
       </head>
@@ -51,18 +51,19 @@ function RootDocument({ children }: { children: React.ReactNode }) {
           position="bottom-right"
           toastOptions={{
             classNames: {
-              toast: '!bg-surface-raised !border !border-line !text-ink !font-sans',
-              description: '!text-ink-muted',
+              toast:
+                "!bg-surface-raised !border !border-line !text-ink !font-sans",
+              description: "!text-ink-muted",
             },
           }}
         />
         <TanStackDevtools
           config={{
-            position: 'bottom-right',
+            position: "bottom-right",
           }}
           plugins={[
             {
-              name: 'Tanstack Router',
+              name: "Tanstack Router",
               render: <TanStackRouterDevtoolsPanel />,
             },
           ]}
@@ -70,5 +71,5 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <Scripts />
       </body>
     </html>
-  )
+  );
 }

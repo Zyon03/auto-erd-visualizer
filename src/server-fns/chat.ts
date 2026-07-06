@@ -5,7 +5,7 @@ import { db } from '../db/client'
 import { listChatMessagesPage } from '../mutations/chatMessages'
 import { runTurn } from '../agent/runTurn'
 import { publishTurnEvent } from '../agent/turnEvents'
-import { cancelRunningTurn } from '../agent/runningTurns'
+import { cancelRunningTurn, isTurnRunning } from '../agent/runningTurns'
 
 const DATABASE_PATH = process.env.DATABASE_PATH ?? path.join(process.cwd(), 'auto-erd.db')
 
@@ -37,3 +37,7 @@ export const cancelTurnFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     cancelRunningTurn(data.sessionId)
   })
+
+export const isTurnRunningFn = createServerFn()
+  .validator(z.object({ sessionId: z.number() }))
+  .handler(async ({ data }) => isTurnRunning(data.sessionId))

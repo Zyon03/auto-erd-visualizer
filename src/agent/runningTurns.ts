@@ -19,3 +19,10 @@ export function cancelRunningTurn(sessionId: number): boolean {
   entry.cancel()
   return true
 }
+
+// Lets a client reconcile its local turnInFlight state against reality -- e.g. right after its
+// SSE connection (re)opens, when it may have missed the turn_complete/turn_error event that
+// would normally have cleared that state (see useSessionEvents' onOpen).
+export function isTurnRunning(sessionId: number): boolean {
+  return runningTurns.has(sessionId)
+}

@@ -12,7 +12,7 @@ import {
   EyeOff,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { sendMessageFn, cancelTurnFn, loadEarlierChatMessagesFn } from '../../server-fns/chat'
+import { sendMessageFn, cancelTurnFn, loadEarlierChatMessagesFn, listChatMessagesFn, isTurnRunningFn } from '../../server-fns/chat'
 import { useSessionEvents } from '../../hooks/useSessionEvents'
 import { ChatMessageBubble } from './ChatMessageBubble'
 import { PendingQuestionDrawer } from './PendingQuestionDrawer'
@@ -184,6 +184,29 @@ export function ChatPanel({
   const sendMessage = useServerFn(sendMessageFn)
   const cancelTurn = useServerFn(cancelTurnFn)
   const loadEarlierMessages = useServerFn(loadEarlierChatMessagesFn)
+  const listRecentMessages = useServerFn(listChatMessagesFn)
+  const checkTurnRunning = useServerFn(isTurnRunningFn)
+
+  // The SSE stream can miss events (a turn finishes while this session's connection was closed
+  // or dropped -- e.g. switching sessions, or a flaky corporate VPN killing an idle connection),
+  // leaving turnInFlight stuck true forever with no event left to clear it. Every time the
+  // connection (re)opens, reconcile against the server's actual state instead of trusting
+  // whatever was last known: refetch the recent messages (any negative, not-yet-persisted local
+  // id is superseded by its real DB row once persisted, so only those need dropping) and ask
+  // whether a turn is genuinely still running for this session.
+  async function reconcile() {
+    const page = await listRecentMessages({ data: { sessionId } })
+    setMessages((prev) => {
+      const byId = new Map(prev.filter((m) => m.id >= 0).map((m) => [m.id, m]))
+      for (const m of page.messages) byId.set(m.id, m)
+      return [...byId.values()].sort((a, b) => a.id - b.id)
+    })
+    setHasMoreOlder(page.hasMore)
+
+    const running = await checkTurnRunning({ data: { sessionId } })
+    setTurnInFlight(running)
+    if (!running) setWorkingNote(null)
+  }
 
   const eventsStatus = useSessionEvents(sessionId, (raw) => {
     const event = raw as TurnEvent
@@ -256,7 +279,7 @@ export function ChatPanel({
       ])
       setTurnInFlight(false)
     }
-  })
+  }, reconcile)
 
   async function handleSend(overrideText?: string) {
     const content = (overrideText ?? draft).trim()
